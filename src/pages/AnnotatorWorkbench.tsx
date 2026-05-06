@@ -62,6 +62,8 @@ export default function AnnotatorWorkbench() {
   const [drafts, setDrafts] = useState<DraftMap>({});
   const [showRules, setShowRules] = useState(false);
   const [historyOpen, setHistoryOpen] = useState<Perspective | null>(null);
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [rightCollapsed, setRightCollapsed] = useState(typeof window !== "undefined" && window.innerWidth < 1280);
 
   const styleStatus = (sId: string): AnnoStatus => {
     if (!task) return "not_started";
