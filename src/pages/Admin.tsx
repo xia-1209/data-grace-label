@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useDB } from "@/lib/useDB";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { PERSPECTIVES, PERSPECTIVE_LABEL, Perspective, Role, log, loadDB, saveDB, uid } from "@/lib/store";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { PERSPECTIVES, PERSPECTIVE_LABEL, Perspective, Role, log, loadDB, saveDB, uid, resetDemo } from "@/lib/store";
 import { useAuth } from "@/lib/auth";
 import { toast } from "sonner";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from "recharts";
@@ -35,9 +36,39 @@ export function AdminDashboard() {
     return { day: ds.slice(5), count: c };
   });
 
+  const restoreBackup = async (file: File) => {
+    if (!confirm("恢复将覆盖所有当前数据，确认？")) return;
+    const text = await file.text();
+    try {
+      const data = JSON.parse(text);
+      localStorage.setItem("garment_anno_db_v1", JSON.stringify(data));
+      window.dispatchEvent(new CustomEvent("db-updated"));
+      toast.success("已恢复");
+    } catch { toast.error("JSON 解析失败"); }
+  };
+
+  const filteredExport = () => {
+    const tag = prompt("按标签值过滤导出（留空导出全部）") || "";
+    const data = db.annotations.filter((a) =>
+      !tag || Object.values(a.data).some((vs) => (Array.isArray(vs) ? vs : [vs]).includes(tag))
+    );
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    saveAs(blob, `annotations_export.json`);
+  };
+
   return (
     <div className="p-6 space-y-4">
-      <h1 className="text-2xl font-bold">仪表盘</h1>
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold">仪表盘</h1>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={filteredExport}>过滤导出 JSON</Button>
+          <Button size="sm" variant="outline" onClick={adminBackupExport}>导出全量备份</Button>
+          <label className="inline-flex">
+            <input type="file" accept=".json" className="hidden" onChange={(e) => e.target.files?.[0] && restoreBackup(e.target.files[0])} />
+            <span className="cursor-pointer text-sm border rounded px-3 py-1.5 hover:bg-muted">恢复备份</span>
+          </label>
+        </div>
+      </div>
       <div className="grid grid-cols-4 gap-4">
         <StatCard label="总标注数" v={total} />
         <StatCard label="待审核" v={submitted} />
@@ -112,28 +143,7 @@ export function AdminDatasets() {
   };
 
   if (viewing) {
-    const ds = db.datasets.find((d) => d.id === viewing)!;
-    return (
-      <div className="p-6 max-w-6xl mx-auto">
-        <Button size="sm" variant="ghost" onClick={() => setViewing(null)}>← 返回</Button>
-        <h1 className="text-2xl font-bold my-3">{ds.name}</h1>
-        <div className="flex gap-2 mb-4">
-          <Button size="sm" onClick={() => exportZip(ds.id)}>导出数据集 ZIP</Button>
-          <Button size="sm" variant="outline" onClick={() => exportAnnotations(ds.id)}>导出标注 JSON</Button>
-        </div>
-        <div className="grid grid-cols-3 gap-3">
-          {ds.images.map((img) => (
-            <Card key={img.id} className="p-2 cursor-pointer" onClick={() => {
-              const annos = db.annotations.filter((a) => a.imageId === img.id);
-              alert(`图片 ${img.filename}\n\n${JSON.stringify(annos, null, 2).slice(0, 800)}`);
-            }}>
-              <img src={img.url} className="w-full h-40 object-cover rounded" alt="" />
-              <div className="text-xs mt-1">{img.filename}</div>
-            </Card>
-          ))}
-        </div>
-      </div>
-    );
+    return <DatasetDetail id={viewing} onClose={() => setViewing(null)} exportZip={exportZip} exportAnnotations={exportAnnotations} />;
   }
 
   if (editing !== null) return <DatasetEditor id={editing} onClose={() => setEditing(null)} />;
@@ -185,28 +195,42 @@ function DatasetEditor({ id, onClose }: { id: string; onClose: () => void }) {
   };
 
   const handleSheet = async (file: File) => {
-    const buf = await file.arrayBuffer();
-    const wb = XLSX.read(buf);
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    const rows: any[] = XLSX.utils.sheet_to_json(ws);
-    let ok = 0, fail = 0;
-    const next = [...images];
-    rows.forEach((r) => {
-      const fn = r["图片文件名"] || r.filename;
-      const persp = r["perspective"];
-      const target = next.find((i) => i.filename === fn);
-      if (!target || !persp) { fail++; return; }
-      target.preselect = target.preselect || {};
-      const obj: Record<string, string[]> = {};
-      Object.keys(r).forEach((k) => {
-        if (k === "图片文件名" || k === "filename" || k === "perspective") return;
-        obj[k] = String(r[k]).split(",").map((s) => s.trim()).filter(Boolean);
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows: any[] = XLSX.utils.sheet_to_json(ws);
+      if (rows.length === 0) { toast.error("表格为空"); return; }
+      const headers = Object.keys(rows[0]);
+      const missing: string[] = [];
+      if (!headers.includes("图片文件名") && !headers.includes("filename")) missing.push("图片文件名");
+      if (!headers.includes("perspective")) missing.push("perspective");
+      if (missing.length > 0) { toast.error(`缺少列：${missing.join(", ")}`); return; }
+      let ok = 0; const errors: string[] = [];
+      const next = [...images];
+      rows.forEach((r, idx) => {
+        const fn = r["图片文件名"] || r.filename;
+        const persp = r["perspective"];
+        const target = next.find((i) => i.filename === fn);
+        if (!target) { errors.push(`第 ${idx + 2} 行：图片文件名 ${fn} 在数据集中不存在`); return; }
+        if (!["production_tob", "commercial_tob", "commercial_toc"].includes(persp)) {
+          errors.push(`第 ${idx + 2} 行：perspective 值 ${persp} 无效`); return;
+        }
+        target.preselect = target.preselect || {};
+        const obj: Record<string, string[]> = {};
+        Object.keys(r).forEach((k) => {
+          if (k === "图片文件名" || k === "filename" || k === "perspective") return;
+          obj[k] = String(r[k]).split(",").map((s) => s.trim()).filter(Boolean);
+        });
+        target.preselect[persp as Perspective] = obj;
+        ok++;
       });
-      target.preselect[persp as Perspective] = obj;
-      ok++;
-    });
-    setImages(next);
-    toast.success(`成功 ${ok} 行，失败 ${fail} 行`);
+      setImages(next);
+      if (errors.length > 0) toast.error(`成功 ${ok} 行，失败 ${errors.length} 行\n${errors.slice(0, 3).join("\n")}`);
+      else toast.success(`成功导入 ${ok} 行`);
+    } catch (e: any) {
+      toast.error(`解析失败：${e.message}`);
+    }
   };
 
   const save = () => {
@@ -264,6 +288,13 @@ function DatasetEditor({ id, onClose }: { id: string; onClose: () => void }) {
 export function AdminTasks() {
   const db = useDB();
   const [editing, setEditing] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [batchAnnotator, setBatchAnnotator] = useState("");
+  const [batchReviewer, setBatchReviewer] = useState("");
+
+  const filtered = db.tasks.filter((t) => t.name.toLowerCase().includes(search.toLowerCase()));
 
   const del = (id: string) => {
     if (!confirm("确认删除该任务？")) return;
@@ -287,26 +318,56 @@ export function AdminTasks() {
     toast.success("已强制打回");
   };
 
+  const applyBatch = () => {
+    const x = loadDB();
+    selected.forEach((tid) => {
+      const t = x.tasks.find((tt) => tt.id === tid);
+      if (!t) return;
+      if (batchAnnotator && !t.annotators.find((a) => a.userPid === batchAnnotator)) {
+        t.annotators.push({ userPid: batchAnnotator, perspectives: [...PERSPECTIVES] });
+      }
+      if (batchReviewer && !t.reviewers.includes(batchReviewer)) {
+        t.reviewers.push(batchReviewer);
+      }
+    });
+    saveDB(x);
+    toast.success(`批量分配 ${selected.size} 个任务`);
+    setSelected(new Set());
+    setBatchOpen(false);
+  };
+
   if (editing !== null) return <TaskEditor id={editing} onClose={() => setEditing(null)} />;
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex justify-between mb-4">
+      <div className="flex justify-between mb-4 items-center gap-2">
         <h1 className="text-2xl font-bold">任务管理</h1>
-        <Button onClick={() => setEditing("__new")}>新建任务</Button>
+        <div className="flex gap-2">
+          <Input placeholder="搜索任务…" value={search} onChange={(e) => setSearch(e.target.value)} className="w-48" />
+          {selected.size > 0 && <Button size="sm" variant="outline" onClick={() => setBatchOpen(true)}>批量分配 ({selected.size})</Button>}
+          <Button onClick={() => setEditing("__new")}>新建任务</Button>
+        </div>
       </div>
       <div className="space-y-3">
-        {db.tasks.map((t) => {
+        {filtered.map((t) => {
           const ds = db.datasets.find((d) => d.id === t.datasetId);
           const total = (ds?.images.length || 0);
           const submitted = db.annotations.filter((a) => a.taskId === t.id && ["submitted", "approved"].includes(a.status)).length;
           return (
             <Card key={t.id} className="p-4">
-              <div className="flex justify-between">
-                <div>
-                  <div className="font-semibold">{t.name}</div>
-                  <div className="text-xs text-muted-foreground">数据集：{ds?.name} · 截止 {t.deadline}</div>
-                  <div className="text-xs">进度 {submitted}/{total}</div>
+              <div className="flex justify-between gap-2">
+                <div className="flex items-start gap-2">
+                  <input type="checkbox" className="mt-1" checked={selected.has(t.id)} onChange={(e) => {
+                    const s = new Set(selected);
+                    if (e.target.checked) s.add(t.id); else s.delete(t.id);
+                    setSelected(s);
+                  }} />
+                  <div>
+                    <div className="font-semibold">{t.name}</div>
+                    <div className="text-xs text-muted-foreground">数据集：{ds?.name} · 截止 {t.deadline}</div>
+                    <div className="text-xs">进度 {submitted}/{total}</div>
+                    <div className="text-xs text-muted-foreground">标注员：{t.annotators.map(a => a.userPid).join(", ")} · 审核员：{t.reviewers.join(", ")}</div>
+                  </div>
                 </div>
                 <div className="flex gap-2">
                   <Button size="sm" variant="outline" onClick={() => setEditing(t.id)}>编辑</Button>
@@ -315,10 +376,10 @@ export function AdminTasks() {
               </div>
               <div className="mt-3 space-y-1">
                 <div className="text-xs font-medium">已提交标注（可强制打回）：</div>
-                {db.annotations.filter((a) => a.taskId === t.id).map((a) => (
+                {db.annotations.filter((a) => a.taskId === t.id).slice(0, 5).map((a) => (
                   <div key={a.id} className="text-xs flex items-center gap-2 border-t pt-1">
                     <span>{a.imageId}</span><span>{PERSPECTIVE_LABEL[a.perspective]}</span><span>[{a.status}]</span>
-                    {a.status !== "rejected" && <Button size="sm" variant="ghost" className="h-6" onClick={() => forceReject(a.id)}>打回</Button>}
+                    {a.status !== "rejected" && <Button size="sm" variant="ghost" className="h-6" onClick={() => forceReject(a.id)}>强制打回</Button>}
                   </div>
                 ))}
               </div>
@@ -326,6 +387,27 @@ export function AdminTasks() {
           );
         })}
       </div>
+
+      <Dialog open={batchOpen} onOpenChange={setBatchOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>批量分配人员</DialogTitle></DialogHeader>
+          <div className="space-y-2">
+            <div className="text-sm">将对 {selected.size} 个任务追加：</div>
+            <select className="border rounded px-2 py-2 w-full" value={batchAnnotator} onChange={(e) => setBatchAnnotator(e.target.value)}>
+              <option value="">不变更标注员</option>
+              {db.users.filter(u => u.role === "annotator").map(u => <option key={u.pid} value={u.pid}>{u.username} ({u.pid})</option>)}
+            </select>
+            <select className="border rounded px-2 py-2 w-full" value={batchReviewer} onChange={(e) => setBatchReviewer(e.target.value)}>
+              <option value="">不变更审核员</option>
+              {db.users.filter(u => u.role === "reviewer").map(u => <option key={u.pid} value={u.pid}>{u.username} ({u.pid})</option>)}
+            </select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBatchOpen(false)}>取消</Button>
+            <Button onClick={applyBatch}>应用</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -619,6 +701,11 @@ export function AdminLibraries() {
 // ---------------- Tag Pool ----------------
 export function AdminTagPool() {
   const db = useDB();
+  const [merging, setMerging] = useState<{ libKey: string; fieldKey: string } | null>(null);
+  const [mergeFrom, setMergeFrom] = useState<Set<string>>(new Set());
+  const [mergeTo, setMergeTo] = useState("");
+  const [filterByLog, setFilterByLog] = useState("");
+
   const handle = (id: string, status: "approved" | "rejected") => {
     const x = loadDB();
     const i = x.tagRequests.findIndex((t) => t.id === id);
@@ -632,9 +719,47 @@ export function AdminTagPool() {
     }
     saveDB(x);
   };
+
+  // Tag usage stats
+  const usage = useMemo(() => {
+    const map: Record<string, number> = {};
+    db.annotations.forEach((a) => {
+      Object.entries(a.data).forEach(([fk, vs]) => {
+        const arr = Array.isArray(vs) ? vs : [vs];
+        arr.forEach((v) => {
+          if (!v) return;
+          const k = `${fk}::${v}`;
+          map[k] = (map[k] || 0) + 1;
+        });
+      });
+    });
+    return map;
+  }, [db.annotations]);
+
+  const doMerge = () => {
+    if (!merging || !mergeTo || mergeFrom.size === 0) return;
+    if (!confirm(`将 ${[...mergeFrom].join(", ")} 合并为「${mergeTo}」？标注数据会迁移。`)) return;
+    const x = loadDB();
+    const lib = x.libraries.find((l) => l.key === merging.libKey)!;
+    const f = lib.fields.find((ff) => ff.key === merging.fieldKey)!;
+    if (!f.options.includes(mergeTo)) f.options.push(mergeTo);
+    f.options = f.options.filter((o) => !mergeFrom.has(o) || o === mergeTo);
+    x.annotations.forEach((a) => {
+      const cur = a.data[f.key];
+      if (Array.isArray(cur)) {
+        a.data[f.key] = Array.from(new Set(cur.map((v) => mergeFrom.has(v) ? mergeTo : v)));
+      }
+    });
+    saveDB(x);
+    log("merge_tags", "admin", `${merging.libKey}/${f.key}: ${[...mergeFrom].join(",")} -> ${mergeTo}`);
+    toast.success("已合并");
+    setMerging(null); setMergeFrom(new Set()); setMergeTo("");
+  };
+
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <h1 className="text-2xl font-bold mb-3">标签池管理</h1>
+    <div className="p-6 max-w-5xl mx-auto space-y-4">
+      <h1 className="text-2xl font-bold">标签池管理</h1>
+
       <Card className="p-4">
         <h3 className="font-semibold mb-2">自定义标签申请</h3>
         {db.tagRequests.length === 0 && <div className="text-muted-foreground text-sm">暂无</div>}
@@ -650,6 +775,62 @@ export function AdminTagPool() {
           </div>
         ))}
       </Card>
+
+      <Card className="p-4">
+        <h3 className="font-semibold mb-2">固定选项 + 使用统计 + 合并</h3>
+        {db.libraries.map((lib) => (
+          <div key={lib.key} className="border-t pt-2 mt-2">
+            <div className="font-medium text-sm mb-1">{lib.name}</div>
+            {lib.fields.filter(f => f.type !== "text").map((f) => (
+              <div key={f.key} className="ml-2 mb-2">
+                <div className="text-xs text-muted-foreground flex items-center gap-2">
+                  <span>{f.label} ({f.key})</span>
+                  <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => { setMerging({ libKey: lib.key, fieldKey: f.key }); setMergeFrom(new Set()); setMergeTo(""); }}>合并选项</Button>
+                </div>
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {f.options.map((o) => (
+                    <span key={o} className="text-xs px-2 py-0.5 bg-muted rounded">
+                      {o} <span className="text-muted-foreground">({usage[`${f.key}::${o}`] || 0})</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        ))}
+      </Card>
+
+      <Dialog open={!!merging} onOpenChange={(o) => !o && setMerging(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>合并标签</DialogTitle></DialogHeader>
+          {merging && (() => {
+            const lib = db.libraries.find(l => l.key === merging.libKey)!;
+            const f = lib.fields.find(ff => ff.key === merging.fieldKey)!;
+            return (
+              <div className="space-y-2 text-sm">
+                <div>选择源标签（多选）：</div>
+                <div className="flex flex-wrap gap-2">
+                  {f.options.map((o) => (
+                    <label key={o} className="flex items-center gap-1 text-xs border rounded px-2 py-1">
+                      <input type="checkbox" checked={mergeFrom.has(o)} onChange={(e) => {
+                        const s = new Set(mergeFrom);
+                        if (e.target.checked) s.add(o); else s.delete(o);
+                        setMergeFrom(s);
+                      }} />{o}
+                    </label>
+                  ))}
+                </div>
+                <div>合并为目标标签：</div>
+                <Input value={mergeTo} onChange={(e) => setMergeTo(e.target.value)} placeholder="新标签名（可与源标签重名）" />
+              </div>
+            );
+          })()}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMerging(null)}>取消</Button>
+            <Button onClick={doMerge}>确认合并</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -657,11 +838,20 @@ export function AdminTagPool() {
 // ---------------- Logs ----------------
 export function AdminLogs() {
   const db = useDB();
+  const [filterAction, setFilterAction] = useState("");
+  const [filterPid, setFilterPid] = useState("");
+  const filtered = db.logs.filter((l) =>
+    (!filterAction || l.action.includes(filterAction)) && (!filterPid || l.pid.includes(filterPid))
+  );
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <h1 className="text-2xl font-bold mb-3">操作日志</h1>
+      <div className="flex gap-2 mb-3">
+        <Input placeholder="按操作类型过滤" value={filterAction} onChange={(e) => setFilterAction(e.target.value)} className="w-48" />
+        <Input placeholder="按 PID 过滤" value={filterPid} onChange={(e) => setFilterPid(e.target.value)} className="w-48" />
+      </div>
       <Card className="p-4 max-h-[70vh] overflow-auto">
-        {db.logs.map((l) => (
+        {filtered.map((l) => (
           <div key={l.id} className="border-b py-1 text-xs flex gap-3">
             <span className="text-muted-foreground">{new Date(l.ts).toLocaleString()}</span>
             <span className="font-medium">{l.pid}</span>
@@ -669,8 +859,121 @@ export function AdminLogs() {
             <span className="text-muted-foreground">{l.detail}</span>
           </div>
         ))}
-        {db.logs.length === 0 && <div className="text-sm text-muted-foreground">暂无日志</div>}
+        {filtered.length === 0 && <div className="text-sm text-muted-foreground">暂无日志</div>}
       </Card>
     </div>
   );
+}
+
+// ---------------- Dataset Detail (multi-select + image modal) ----------------
+function DatasetDetail({ id, onClose, exportZip, exportAnnotations }: {
+  id: string; onClose: () => void;
+  exportZip: (id: string) => void; exportAnnotations: (id: string) => void;
+}) {
+  const db = useDB();
+  const ds = db.datasets.find((d) => d.id === id);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [search, setSearch] = useState("");
+  const [viewImg, setViewImg] = useState<string | null>(null);
+  if (!ds) return <div className="p-6">数据集不存在</div>;
+
+  const filtered = ds.images.filter((i) => i.filename.toLowerCase().includes(search.toLowerCase()));
+
+  const batchDelete = () => {
+    if (selected.size === 0) return;
+    if (!confirm(`确认删除 ${selected.size} 张图片及关联标注？`)) return;
+    const x = loadDB();
+    const di = x.datasets.findIndex((d) => d.id === id);
+    x.datasets[di].images = x.datasets[di].images.filter((i) => !selected.has(i.id));
+    x.annotations = x.annotations.filter((a) => !selected.has(a.imageId));
+    saveDB(x);
+    setSelected(new Set());
+    toast.success("已批量删除");
+  };
+
+  const exportImageJson = (imgId: string) => {
+    const annos = db.annotations.filter((a) => a.imageId === imgId);
+    const img = ds.images.find((i) => i.id === imgId);
+    const blob = new Blob([JSON.stringify({ image: img, annotations: annos }, null, 2)], { type: "application/json" });
+    saveAs(blob, `${img?.filename || imgId}.json`);
+  };
+
+  return (
+    <div className="p-6 max-w-6xl mx-auto">
+      <Button size="sm" variant="ghost" onClick={onClose}>← 返回</Button>
+      <div className="flex justify-between items-center my-3">
+        <h1 className="text-2xl font-bold">{ds.name}</h1>
+        <div className="flex gap-2">
+          <Input placeholder="搜索文件名" value={search} onChange={(e) => setSearch(e.target.value)} className="w-48" />
+          <Button size="sm" onClick={() => exportZip(ds.id)}>导出 ZIP</Button>
+          <Button size="sm" variant="outline" onClick={() => exportAnnotations(ds.id)}>导出标注 JSON</Button>
+        </div>
+      </div>
+      {selected.size > 0 && (
+        <div className="bg-card border rounded p-2 mb-3 flex gap-2 items-center">
+          <span className="text-sm">已选 {selected.size} 张</span>
+          <Button size="sm" variant="destructive" onClick={batchDelete}>批量删除</Button>
+          <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>清空</Button>
+        </div>
+      )}
+      <div className="grid grid-cols-3 gap-3">
+        {filtered.map((img) => (
+          <Card key={img.id} className="p-2 relative">
+            <input type="checkbox" className="absolute top-2 left-2 z-10"
+              checked={selected.has(img.id)}
+              onChange={(e) => {
+                const s = new Set(selected);
+                if (e.target.checked) s.add(img.id); else s.delete(img.id);
+                setSelected(s);
+              }} />
+            <img src={img.url} className="w-full h-40 object-cover rounded cursor-pointer" alt="" onClick={() => setViewImg(img.id)} />
+            <div className="text-xs mt-1 truncate">{img.filename}</div>
+          </Card>
+        ))}
+      </div>
+
+      <Dialog open={!!viewImg} onOpenChange={(o) => !o && setViewImg(null)}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader><DialogTitle>图片标注详情</DialogTitle></DialogHeader>
+          {viewImg && (() => {
+            const img = ds.images.find((i) => i.id === viewImg)!;
+            const annos = db.annotations.filter((a) => a.imageId === viewImg);
+            return (
+              <div className="space-y-3 max-h-[70vh] overflow-auto">
+                <div className="flex gap-3">
+                  <img src={img.url} className="w-40 h-40 object-cover rounded" alt="" />
+                  <div className="text-sm">
+                    <div><b>{img.filename}</b></div>
+                    <Button size="sm" variant="outline" className="mt-2" onClick={() => exportImageJson(viewImg)}>导出该图标注 JSON</Button>
+                  </div>
+                </div>
+                {PERSPECTIVES.map((p) => {
+                  const a = annos.find((x) => x.perspective === p);
+                  return (
+                    <div key={p} className="border rounded p-2 bg-muted/30">
+                      <div className="text-sm font-medium">{PERSPECTIVE_LABEL[p]} {a && <span className="text-xs text-muted-foreground">[{a.status}] {a.annotatorPid}</span>}</div>
+                      {a ? (
+                        <>
+                          <div className="text-xs">数据：{JSON.stringify(a.data)}</div>
+                          {a.craftPartGroups && a.craftPartGroups.length > 0 && <div className="text-xs">工艺-部位：{JSON.stringify(a.craftPartGroups)}</div>}
+                          {a.customTags?.length > 0 && <div className="text-xs">自定义：{a.customTags.join(", ")}</div>}
+                          <div className="text-xs text-muted-foreground">历史 ({a.history.length} 次)</div>
+                        </>
+                      ) : <div className="text-xs text-muted-foreground">尚无标注</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ---------------- Backup / Restore ----------------
+export function adminBackupExport() {
+  const blob = new Blob([JSON.stringify(loadDB(), null, 2)], { type: "application/json" });
+  saveAs(blob, `backup_${new Date().toISOString().slice(0, 10)}.json`);
 }
