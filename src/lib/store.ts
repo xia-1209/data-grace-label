@@ -270,7 +270,7 @@ function seedDB(): DB {
 
   return {
     users,
-    libraries: [styleLib, fabricLib],
+    libraries: [styleLib, fabricLib, commentLib],
     datasets: [dataset],
     tasks: [task],
     annotations: [],
