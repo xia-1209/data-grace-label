@@ -244,6 +244,13 @@ function DatasetEditor({ id, onClose }: { id: string; onClose: () => void }) {
 export function AdminTasks() {
   const db = useDB();
   const [editing, setEditing] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [batchAnnotator, setBatchAnnotator] = useState("");
+  const [batchReviewer, setBatchReviewer] = useState("");
+
+  const filtered = db.tasks.filter((t) => t.name.toLowerCase().includes(search.toLowerCase()));
 
   const del = (id: string) => {
     if (!confirm("确认删除该任务？")) return;
@@ -267,26 +274,56 @@ export function AdminTasks() {
     toast.success("已强制打回");
   };
 
+  const applyBatch = () => {
+    const x = loadDB();
+    selected.forEach((tid) => {
+      const t = x.tasks.find((tt) => tt.id === tid);
+      if (!t) return;
+      if (batchAnnotator && !t.annotators.find((a) => a.userPid === batchAnnotator)) {
+        t.annotators.push({ userPid: batchAnnotator, perspectives: [...PERSPECTIVES] });
+      }
+      if (batchReviewer && !t.reviewers.includes(batchReviewer)) {
+        t.reviewers.push(batchReviewer);
+      }
+    });
+    saveDB(x);
+    toast.success(`批量分配 ${selected.size} 个任务`);
+    setSelected(new Set());
+    setBatchOpen(false);
+  };
+
   if (editing !== null) return <TaskEditor id={editing} onClose={() => setEditing(null)} />;
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex justify-between mb-4">
+      <div className="flex justify-between mb-4 items-center gap-2">
         <h1 className="text-2xl font-bold">任务管理</h1>
-        <Button onClick={() => setEditing("__new")}>新建任务</Button>
+        <div className="flex gap-2">
+          <Input placeholder="搜索任务…" value={search} onChange={(e) => setSearch(e.target.value)} className="w-48" />
+          {selected.size > 0 && <Button size="sm" variant="outline" onClick={() => setBatchOpen(true)}>批量分配 ({selected.size})</Button>}
+          <Button onClick={() => setEditing("__new")}>新建任务</Button>
+        </div>
       </div>
       <div className="space-y-3">
-        {db.tasks.map((t) => {
+        {filtered.map((t) => {
           const ds = db.datasets.find((d) => d.id === t.datasetId);
           const total = (ds?.images.length || 0);
           const submitted = db.annotations.filter((a) => a.taskId === t.id && ["submitted", "approved"].includes(a.status)).length;
           return (
             <Card key={t.id} className="p-4">
-              <div className="flex justify-between">
-                <div>
-                  <div className="font-semibold">{t.name}</div>
-                  <div className="text-xs text-muted-foreground">数据集：{ds?.name} · 截止 {t.deadline}</div>
-                  <div className="text-xs">进度 {submitted}/{total}</div>
+              <div className="flex justify-between gap-2">
+                <div className="flex items-start gap-2">
+                  <input type="checkbox" className="mt-1" checked={selected.has(t.id)} onChange={(e) => {
+                    const s = new Set(selected);
+                    if (e.target.checked) s.add(t.id); else s.delete(t.id);
+                    setSelected(s);
+                  }} />
+                  <div>
+                    <div className="font-semibold">{t.name}</div>
+                    <div className="text-xs text-muted-foreground">数据集：{ds?.name} · 截止 {t.deadline}</div>
+                    <div className="text-xs">进度 {submitted}/{total}</div>
+                    <div className="text-xs text-muted-foreground">标注员：{t.annotators.map(a => a.userPid).join(", ")} · 审核员：{t.reviewers.join(", ")}</div>
+                  </div>
                 </div>
                 <div className="flex gap-2">
                   <Button size="sm" variant="outline" onClick={() => setEditing(t.id)}>编辑</Button>
@@ -295,10 +332,10 @@ export function AdminTasks() {
               </div>
               <div className="mt-3 space-y-1">
                 <div className="text-xs font-medium">已提交标注（可强制打回）：</div>
-                {db.annotations.filter((a) => a.taskId === t.id).map((a) => (
+                {db.annotations.filter((a) => a.taskId === t.id).slice(0, 5).map((a) => (
                   <div key={a.id} className="text-xs flex items-center gap-2 border-t pt-1">
                     <span>{a.imageId}</span><span>{PERSPECTIVE_LABEL[a.perspective]}</span><span>[{a.status}]</span>
-                    {a.status !== "rejected" && <Button size="sm" variant="ghost" className="h-6" onClick={() => forceReject(a.id)}>打回</Button>}
+                    {a.status !== "rejected" && <Button size="sm" variant="ghost" className="h-6" onClick={() => forceReject(a.id)}>强制打回</Button>}
                   </div>
                 ))}
               </div>
@@ -306,6 +343,27 @@ export function AdminTasks() {
           );
         })}
       </div>
+
+      <Dialog open={batchOpen} onOpenChange={setBatchOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>批量分配人员</DialogTitle></DialogHeader>
+          <div className="space-y-2">
+            <div className="text-sm">将对 {selected.size} 个任务追加：</div>
+            <select className="border rounded px-2 py-2 w-full" value={batchAnnotator} onChange={(e) => setBatchAnnotator(e.target.value)}>
+              <option value="">不变更标注员</option>
+              {db.users.filter(u => u.role === "annotator").map(u => <option key={u.pid} value={u.pid}>{u.username} ({u.pid})</option>)}
+            </select>
+            <select className="border rounded px-2 py-2 w-full" value={batchReviewer} onChange={(e) => setBatchReviewer(e.target.value)}>
+              <option value="">不变更审核员</option>
+              {db.users.filter(u => u.role === "reviewer").map(u => <option key={u.pid} value={u.pid}>{u.username} ({u.pid})</option>)}
+            </select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBatchOpen(false)}>取消</Button>
+            <Button onClick={applyBatch}>应用</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
