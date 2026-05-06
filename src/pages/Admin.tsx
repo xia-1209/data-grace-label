@@ -195,28 +195,42 @@ function DatasetEditor({ id, onClose }: { id: string; onClose: () => void }) {
   };
 
   const handleSheet = async (file: File) => {
-    const buf = await file.arrayBuffer();
-    const wb = XLSX.read(buf);
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    const rows: any[] = XLSX.utils.sheet_to_json(ws);
-    let ok = 0, fail = 0;
-    const next = [...images];
-    rows.forEach((r) => {
-      const fn = r["图片文件名"] || r.filename;
-      const persp = r["perspective"];
-      const target = next.find((i) => i.filename === fn);
-      if (!target || !persp) { fail++; return; }
-      target.preselect = target.preselect || {};
-      const obj: Record<string, string[]> = {};
-      Object.keys(r).forEach((k) => {
-        if (k === "图片文件名" || k === "filename" || k === "perspective") return;
-        obj[k] = String(r[k]).split(",").map((s) => s.trim()).filter(Boolean);
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows: any[] = XLSX.utils.sheet_to_json(ws);
+      if (rows.length === 0) { toast.error("表格为空"); return; }
+      const headers = Object.keys(rows[0]);
+      const missing: string[] = [];
+      if (!headers.includes("图片文件名") && !headers.includes("filename")) missing.push("图片文件名");
+      if (!headers.includes("perspective")) missing.push("perspective");
+      if (missing.length > 0) { toast.error(`缺少列：${missing.join(", ")}`); return; }
+      let ok = 0; const errors: string[] = [];
+      const next = [...images];
+      rows.forEach((r, idx) => {
+        const fn = r["图片文件名"] || r.filename;
+        const persp = r["perspective"];
+        const target = next.find((i) => i.filename === fn);
+        if (!target) { errors.push(`第 ${idx + 2} 行：图片文件名 ${fn} 在数据集中不存在`); return; }
+        if (!["production_tob", "commercial_tob", "commercial_toc"].includes(persp)) {
+          errors.push(`第 ${idx + 2} 行：perspective 值 ${persp} 无效`); return;
+        }
+        target.preselect = target.preselect || {};
+        const obj: Record<string, string[]> = {};
+        Object.keys(r).forEach((k) => {
+          if (k === "图片文件名" || k === "filename" || k === "perspective") return;
+          obj[k] = String(r[k]).split(",").map((s) => s.trim()).filter(Boolean);
+        });
+        target.preselect[persp as Perspective] = obj;
+        ok++;
       });
-      target.preselect[persp as Perspective] = obj;
-      ok++;
-    });
-    setImages(next);
-    toast.success(`成功 ${ok} 行，失败 ${fail} 行`);
+      setImages(next);
+      if (errors.length > 0) toast.error(`成功 ${ok} 行，失败 ${errors.length} 行\n${errors.slice(0, 3).join("\n")}`);
+      else toast.success(`成功导入 ${ok} 行`);
+    } catch (e: any) {
+      toast.error(`解析失败：${e.message}`);
+    }
   };
 
   const save = () => {
