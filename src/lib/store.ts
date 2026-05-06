@@ -44,10 +44,16 @@ export interface Library {
   craftPart?: CraftPartConfig;
 }
 
-export interface DatasetImage {
-  id: string;
-  filename: string;
+export interface StyleImage {
   url: string;
+  angle?: string;
+  filename?: string;
+}
+
+export interface DatasetStyle {
+  id: string;          // internal id (uid)
+  styleId: string;     // business style id, unique within dataset
+  images: StyleImage[];
   preselect?: Partial<Record<Perspective, Record<string, string[]>>>;
 }
 
@@ -55,7 +61,7 @@ export interface Dataset {
   id: string;
   name: string;
   description: string;
-  images: DatasetImage[];
+  styles: DatasetStyle[];
   createdAt: number;
   updatedAt: number;
 }
@@ -83,10 +89,21 @@ export interface CraftPartGroup {
   parts: string[];
 }
 
+export interface AnnoVersion {
+  ts: number;
+  status: AnnoStatus;
+  by: string;
+  reason?: string;
+  data?: Record<string, string[] | string>;
+  craftPartGroups?: CraftPartGroup[];
+  customTags?: string[];
+  note?: string; // reviewer internal note
+}
+
 export interface Annotation {
   id: string;
   taskId: string;
-  imageId: string;
+  styleId: string; // refers DatasetStyle.id
   perspective: Perspective;
   status: AnnoStatus;
   data: Record<string, string[] | string>;
@@ -95,7 +112,8 @@ export interface Annotation {
   annotatorPid?: string;
   reviewerPid?: string;
   rejectReason?: string;
-  history: Array<{ ts: number; status: AnnoStatus; by: string; reason?: string }>;
+  reviewerNotes?: string[];
+  history: AnnoVersion[];
   updatedAt: number;
 }
 
@@ -146,7 +164,7 @@ export interface DB {
   ruleVersions: Array<{ id: string; ruleId: string; snapshot: Rule; ts: number }>;
 }
 
-const KEY = "garment_anno_db_v1";
+const KEY = "garment_anno_db_v2";
 
 export const uid = () => Math.random().toString(36).slice(2, 10);
 
