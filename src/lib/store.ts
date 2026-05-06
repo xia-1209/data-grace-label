@@ -164,7 +164,7 @@ export interface DB {
   ruleVersions: Array<{ id: string; ruleId: string; snapshot: Rule; ts: number }>;
 }
 
-const KEY = "garment_anno_db_v2";
+const KEY = "garment_anno_db_v3_multilib";
 
 export const uid = () => Math.random().toString(36).slice(2, 10);
 
