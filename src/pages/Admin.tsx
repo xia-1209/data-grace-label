@@ -180,21 +180,12 @@ function DatasetEditor({ id, onClose }: { id: string; onClose: () => void }) {
   const ex = db.datasets.find((d) => d.id === id);
   const [name, setName] = useState(ex?.name || "");
   const [desc, setDesc] = useState(ex?.description || "");
-  const [images, setImages] = useState(ex?.images || []);
+  const [styles, setStyles] = useState(ex?.styles || []);
   const [search, setSearch] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  const handleFiles = (files: FileList | null) => {
-    if (!files) return;
-    Array.from(files).forEach((f) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        setImages((prev) => [...prev, { id: uid(), filename: f.name, url: reader.result as string }]);
-      };
-      reader.readAsDataURL(f);
-    });
-  };
-
-  const handleSheet = async (file: File) => {
+  const handleStylesCsv = async (file: File) => {
+    setBusy(true);
     try {
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf);
@@ -203,50 +194,89 @@ function DatasetEditor({ id, onClose }: { id: string; onClose: () => void }) {
       if (rows.length === 0) { toast.error("表格为空"); return; }
       const headers = Object.keys(rows[0]);
       const missing: string[] = [];
-      if (!headers.includes("图片文件名") && !headers.includes("filename")) missing.push("图片文件名");
+      if (!headers.includes("style_id") && !headers.includes("款式ID")) missing.push("style_id");
+      if (!headers.includes("image_url") && !headers.includes("图片URL")) missing.push("image_url");
+      if (missing.length > 0) { toast.error(`缺少列：${missing.join(", ")}`); return; }
+      const next = [...styles];
+      let added = 0; const errors: string[] = [];
+      rows.forEach((r, idx) => {
+        const sid = String(r.style_id || r["款式ID"] || "").trim();
+        const url = String(r.image_url || r["图片URL"] || "").trim();
+        const angle = String(r.angle || r["角度"] || "").trim();
+        if (!sid) { errors.push(`第 ${idx + 2} 行：缺少 style_id`); return; }
+        if (!url) { errors.push(`第 ${idx + 2} 行：缺少 image_url`); return; }
+        let s = next.find((ss) => ss.styleId === sid);
+        if (!s) { s = { id: uid(), styleId: sid, images: [] }; next.push(s); }
+        s.images.push({ url, angle: angle || undefined, filename: url.split("/").pop() });
+        added++;
+      });
+      setStyles(next);
+      if (errors.length > 0) toast.error(`成功 ${added} 行，失败 ${errors.length} 行：${errors.slice(0, 3).join("; ")}`);
+      else toast.success(`成功导入 ${added} 行（共 ${next.length} 个款式）`);
+    } catch (e: any) {
+      toast.error(`解析失败：${e.message}`);
+    } finally { setBusy(false); }
+  };
+
+  const handlePreselect = async (file: File) => {
+    setBusy(true);
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows: any[] = XLSX.utils.sheet_to_json(ws);
+      if (rows.length === 0) { toast.error("表格为空"); return; }
+      const headers = Object.keys(rows[0]);
+      const missing: string[] = [];
+      if (!headers.includes("style_id")) missing.push("style_id");
       if (!headers.includes("perspective")) missing.push("perspective");
       if (missing.length > 0) { toast.error(`缺少列：${missing.join(", ")}`); return; }
+      const next = [...styles];
       let ok = 0; const errors: string[] = [];
-      const next = [...images];
       rows.forEach((r, idx) => {
-        const fn = r["图片文件名"] || r.filename;
-        const persp = r["perspective"];
-        const target = next.find((i) => i.filename === fn);
-        if (!target) { errors.push(`第 ${idx + 2} 行：图片文件名 ${fn} 在数据集中不存在`); return; }
+        const sid = String(r.style_id);
+        const persp = r.perspective;
+        const target = next.find((s) => s.styleId === sid);
+        if (!target) { errors.push(`第 ${idx + 2} 行：款式ID ${sid} 不存在`); return; }
         if (!["production_tob", "commercial_tob", "commercial_toc"].includes(persp)) {
-          errors.push(`第 ${idx + 2} 行：perspective 值 ${persp} 无效`); return;
+          errors.push(`第 ${idx + 2} 行：perspective ${persp} 无效`); return;
         }
         target.preselect = target.preselect || {};
         const obj: Record<string, string[]> = {};
         Object.keys(r).forEach((k) => {
-          if (k === "图片文件名" || k === "filename" || k === "perspective") return;
+          if (["style_id", "perspective"].includes(k)) return;
           obj[k] = String(r[k]).split(",").map((s) => s.trim()).filter(Boolean);
         });
         target.preselect[persp as Perspective] = obj;
         ok++;
       });
-      setImages(next);
-      if (errors.length > 0) toast.error(`成功 ${ok} 行，失败 ${errors.length} 行\n${errors.slice(0, 3).join("\n")}`);
-      else toast.success(`成功导入 ${ok} 行`);
+      setStyles(next);
+      if (errors.length > 0) toast.error(`成功 ${ok} 行，失败 ${errors.length} 行：${errors.slice(0, 3).join("; ")}`);
+      else toast.success(`成功导入 ${ok} 行预选标签`);
     } catch (e: any) {
       toast.error(`解析失败：${e.message}`);
-    }
+    } finally { setBusy(false); }
+  };
+
+  const downloadTemplate = () => {
+    const csv = "style_id,image_url,angle\nSTY-001,https://example.com/a.jpg,front\nSTY-001,https://example.com/b.jpg,back\nSTY-002,https://example.com/c.jpg,front";
+    saveAs(new Blob([csv], { type: "text/csv" }), "styles_template.csv");
   };
 
   const save = () => {
     const x = loadDB();
     if (isNew) {
-      x.datasets.push({ id: uid(), name, description: desc, images, createdAt: Date.now(), updatedAt: Date.now() });
+      x.datasets.push({ id: uid(), name, description: desc, styles, createdAt: Date.now(), updatedAt: Date.now() });
     } else {
       const i = x.datasets.findIndex((d) => d.id === id);
-      x.datasets[i] = { ...x.datasets[i], name, description: desc, images, updatedAt: Date.now() };
+      x.datasets[i] = { ...x.datasets[i], name, description: desc, styles, updatedAt: Date.now() };
     }
     saveDB(x);
     toast.success("已保存");
     onClose();
   };
 
-  const filtered = images.filter((i) => i.filename.toLowerCase().includes(search.toLowerCase()));
+  const filtered = styles.filter((s) => s.styleId.toLowerCase().includes(search.toLowerCase()));
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-4">
@@ -258,27 +288,51 @@ function DatasetEditor({ id, onClose }: { id: string; onClose: () => void }) {
         <label className="text-sm">描述</label>
         <Input value={desc} onChange={(e) => setDesc(e.target.value)} />
       </div>
+
       <Card className="p-4 space-y-2">
         <div className="flex items-center justify-between">
-          <h3 className="font-semibold">图片管理 ({images.length})</h3>
-          <Input placeholder="搜索文件名" value={search} onChange={(e) => setSearch(e.target.value)} className="w-48 h-8" />
+          <h3 className="font-semibold">款式上传 (CSV/XLSX) {busy && <span className="text-xs text-primary ml-2">解析中…</span>}</h3>
+          <Button size="sm" variant="outline" onClick={downloadTemplate}>下载模板</Button>
         </div>
-        <input type="file" accept="image/*" multiple onChange={(e) => handleFiles(e.target.files)} />
-        <div className="grid grid-cols-4 gap-2">
-          {filtered.map((img) => (
-            <div key={img.id} className="relative">
-              <img src={img.url} className="w-full h-24 object-cover rounded" alt="" />
-              <div className="text-xs truncate">{img.filename}</div>
-              <button className="absolute top-1 right-1 bg-destructive text-white rounded px-1 text-xs" onClick={() => setImages((p) => p.filter((x) => x.id !== img.id))}>×</button>
+        <p className="text-xs text-muted-foreground">列：style_id, image_url, angle（可选）。同 style_id 的多行自动归为一个款式的多张图。</p>
+        <input type="file" accept=".csv,.xlsx" onChange={(e) => e.target.files?.[0] && handleStylesCsv(e.target.files[0])} />
+      </Card>
+
+      <Card className="p-4 space-y-2">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold">预选标签上传 (CSV/XLSX)</h3>
+        </div>
+        <p className="text-xs text-muted-foreground">列：style_id, perspective, 其他字段（多值用逗号分隔）。</p>
+        <input type="file" accept=".csv,.xlsx" onChange={(e) => e.target.files?.[0] && handlePreselect(e.target.files[0])} />
+      </Card>
+
+      <Card className="p-4 space-y-2">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold">款式管理 ({styles.length})</h3>
+          <Input placeholder="搜索款式ID" value={search} onChange={(e) => setSearch(e.target.value)} className="w-48 h-8" />
+        </div>
+        <div className="space-y-2 max-h-96 overflow-auto">
+          {filtered.map((s) => (
+            <div key={s.id} className="border rounded p-2 flex gap-2 items-center">
+              <div className="font-medium text-sm w-24">{s.styleId}</div>
+              <div className="flex gap-1 flex-1 overflow-auto">
+                {s.images.map((im, i) => (
+                  <div key={i} className="relative">
+                    <img src={im.url} className="w-14 h-14 object-cover rounded" alt="" />
+                    <div className="text-[10px] text-center">{im.angle || ""}</div>
+                  </div>
+                ))}
+              </div>
+              <Button size="sm" variant="ghost" onClick={() => {
+                if (!confirm(`删除款式 ${s.styleId}?`)) return;
+                setStyles((p) => p.filter((x) => x.id !== s.id));
+              }}>删除</Button>
             </div>
           ))}
+          {filtered.length === 0 && <div className="text-xs text-muted-foreground">暂无款式</div>}
         </div>
       </Card>
-      <Card className="p-4 space-y-2">
-        <h3 className="font-semibold">预选标签上传 (CSV/XLSX)</h3>
-        <p className="text-xs text-muted-foreground">需包含列：图片文件名、perspective、其它字段</p>
-        <input type="file" accept=".csv,.xlsx" onChange={(e) => e.target.files?.[0] && handleSheet(e.target.files[0])} />
-      </Card>
+
       <Button onClick={save}>保存</Button>
     </div>
   );
