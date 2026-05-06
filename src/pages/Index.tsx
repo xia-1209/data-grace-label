@@ -129,7 +129,7 @@ const Index = () => {
         {f.allowCustom && (
           <button
             onClick={() => setAddDialog({ field: f.key, name: "" })}
-            className="h-5 w-5 rounded-full bg-primary-soft text-primary flex items-center justify-center hover:bg-primary hover:text-primary-foreground transition"
+            className="h-5 w-5 rounded-full bg-primary/10 text-primary flex items-center justify-center hover:bg-primary hover:text-primary-foreground transition"
             title={t.addOption}
           >
             <Plus className="h-3 w-3" />
