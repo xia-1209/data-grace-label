@@ -654,3 +654,116 @@ export function AdminLogs() {
     </div>
   );
 }
+
+// ---------------- Dataset Detail (multi-select + image modal) ----------------
+function DatasetDetail({ id, onClose, exportZip, exportAnnotations }: {
+  id: string; onClose: () => void;
+  exportZip: (id: string) => void; exportAnnotations: (id: string) => void;
+}) {
+  const db = useDB();
+  const ds = db.datasets.find((d) => d.id === id);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [search, setSearch] = useState("");
+  const [viewImg, setViewImg] = useState<string | null>(null);
+  if (!ds) return <div className="p-6">数据集不存在</div>;
+
+  const filtered = ds.images.filter((i) => i.filename.toLowerCase().includes(search.toLowerCase()));
+
+  const batchDelete = () => {
+    if (selected.size === 0) return;
+    if (!confirm(`确认删除 ${selected.size} 张图片及关联标注？`)) return;
+    const x = loadDB();
+    const di = x.datasets.findIndex((d) => d.id === id);
+    x.datasets[di].images = x.datasets[di].images.filter((i) => !selected.has(i.id));
+    x.annotations = x.annotations.filter((a) => !selected.has(a.imageId));
+    saveDB(x);
+    setSelected(new Set());
+    toast.success("已批量删除");
+  };
+
+  const exportImageJson = (imgId: string) => {
+    const annos = db.annotations.filter((a) => a.imageId === imgId);
+    const img = ds.images.find((i) => i.id === imgId);
+    const blob = new Blob([JSON.stringify({ image: img, annotations: annos }, null, 2)], { type: "application/json" });
+    saveAs(blob, `${img?.filename || imgId}.json`);
+  };
+
+  return (
+    <div className="p-6 max-w-6xl mx-auto">
+      <Button size="sm" variant="ghost" onClick={onClose}>← 返回</Button>
+      <div className="flex justify-between items-center my-3">
+        <h1 className="text-2xl font-bold">{ds.name}</h1>
+        <div className="flex gap-2">
+          <Input placeholder="搜索文件名" value={search} onChange={(e) => setSearch(e.target.value)} className="w-48" />
+          <Button size="sm" onClick={() => exportZip(ds.id)}>导出 ZIP</Button>
+          <Button size="sm" variant="outline" onClick={() => exportAnnotations(ds.id)}>导出标注 JSON</Button>
+        </div>
+      </div>
+      {selected.size > 0 && (
+        <div className="bg-card border rounded p-2 mb-3 flex gap-2 items-center">
+          <span className="text-sm">已选 {selected.size} 张</span>
+          <Button size="sm" variant="destructive" onClick={batchDelete}>批量删除</Button>
+          <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>清空</Button>
+        </div>
+      )}
+      <div className="grid grid-cols-3 gap-3">
+        {filtered.map((img) => (
+          <Card key={img.id} className="p-2 relative">
+            <input type="checkbox" className="absolute top-2 left-2 z-10"
+              checked={selected.has(img.id)}
+              onChange={(e) => {
+                const s = new Set(selected);
+                if (e.target.checked) s.add(img.id); else s.delete(img.id);
+                setSelected(s);
+              }} />
+            <img src={img.url} className="w-full h-40 object-cover rounded cursor-pointer" alt="" onClick={() => setViewImg(img.id)} />
+            <div className="text-xs mt-1 truncate">{img.filename}</div>
+          </Card>
+        ))}
+      </div>
+
+      <Dialog open={!!viewImg} onOpenChange={(o) => !o && setViewImg(null)}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader><DialogTitle>图片标注详情</DialogTitle></DialogHeader>
+          {viewImg && (() => {
+            const img = ds.images.find((i) => i.id === viewImg)!;
+            const annos = db.annotations.filter((a) => a.imageId === viewImg);
+            return (
+              <div className="space-y-3 max-h-[70vh] overflow-auto">
+                <div className="flex gap-3">
+                  <img src={img.url} className="w-40 h-40 object-cover rounded" alt="" />
+                  <div className="text-sm">
+                    <div><b>{img.filename}</b></div>
+                    <Button size="sm" variant="outline" className="mt-2" onClick={() => exportImageJson(viewImg)}>导出该图标注 JSON</Button>
+                  </div>
+                </div>
+                {PERSPECTIVES.map((p) => {
+                  const a = annos.find((x) => x.perspective === p);
+                  return (
+                    <div key={p} className="border rounded p-2 bg-muted/30">
+                      <div className="text-sm font-medium">{PERSPECTIVE_LABEL[p]} {a && <span className="text-xs text-muted-foreground">[{a.status}] {a.annotatorPid}</span>}</div>
+                      {a ? (
+                        <>
+                          <div className="text-xs">数据：{JSON.stringify(a.data)}</div>
+                          {a.craftPartGroups && a.craftPartGroups.length > 0 && <div className="text-xs">工艺-部位：{JSON.stringify(a.craftPartGroups)}</div>}
+                          {a.customTags?.length > 0 && <div className="text-xs">自定义：{a.customTags.join(", ")}</div>}
+                          <div className="text-xs text-muted-foreground">历史 ({a.history.length} 次)</div>
+                        </>
+                      ) : <div className="text-xs text-muted-foreground">尚无标注</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ---------------- Backup / Restore ----------------
+export function adminBackupExport() {
+  const blob = new Blob([JSON.stringify(loadDB(), null, 2)], { type: "application/json" });
+  saveAs(blob, `backup_${new Date().toISOString().slice(0, 10)}.json`);
+}
