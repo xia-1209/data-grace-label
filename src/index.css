@@ -8,37 +8,44 @@ All colors MUST be HSL.
 
 @layer base {
   :root {
-    --background: 220 24% 97%;
-    --foreground: 222 30% 12%;
+    --background: 0 0% 96%;
+    --foreground: 0 0% 7%;
 
     --card: 0 0% 100%;
-    --card-foreground: 222 30% 12%;
+    --card-foreground: 0 0% 7%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 222 30% 12%;
+    --popover-foreground: 0 0% 7%;
 
-    --primary: 240 70% 55%;
+    --primary: 0 0% 12%;
     --primary-foreground: 0 0% 100%;
-    --primary-soft: 240 90% 96%;
+    --primary-soft: 0 0% 94%;
 
-    --secondary: 220 16% 94%;
-    --secondary-foreground: 222 30% 18%;
+    --secondary: 0 0% 92%;
+    --secondary-foreground: 0 0% 12%;
 
-    --muted: 220 16% 94%;
-    --muted-foreground: 222 12% 45%;
+    --muted: 0 0% 94%;
+    --muted-foreground: 0 0% 40%;
 
-    --accent: 268 70% 60%;
-    --accent-foreground: 0 0% 100%;
+    /* Morandi sage accent (#C7D3C6) for charts/badges */
+    --accent: 110 12% 80%;
+    --accent-foreground: 0 0% 12%;
 
-    --success: 152 60% 42%;
-    --warning: 38 92% 50%;
+    /* Morandi palette tokens (chart use) */
+    --morandi-sage: 110 12% 80%;
+    --morandi-blue: 203 22% 60%;
+    --morandi-pink: 0 22% 80%;
+    --morandi-cream: 39 38% 84%;
 
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
+    --success: 110 18% 55%;
+    --warning: 39 38% 60%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    --destructive: 0 60% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 0 0% 88%;
+    --input: 0 0% 88%;
+    --ring: 0 0% 50%;
 
     --radius: 0.5rem;
 
