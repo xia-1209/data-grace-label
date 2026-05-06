@@ -36,9 +36,39 @@ export function AdminDashboard() {
     return { day: ds.slice(5), count: c };
   });
 
+  const restoreBackup = async (file: File) => {
+    if (!confirm("恢复将覆盖所有当前数据，确认？")) return;
+    const text = await file.text();
+    try {
+      const data = JSON.parse(text);
+      localStorage.setItem("garment_anno_db_v1", JSON.stringify(data));
+      window.dispatchEvent(new CustomEvent("db-updated"));
+      toast.success("已恢复");
+    } catch { toast.error("JSON 解析失败"); }
+  };
+
+  const filteredExport = () => {
+    const tag = prompt("按标签值过滤导出（留空导出全部）") || "";
+    const data = db.annotations.filter((a) =>
+      !tag || Object.values(a.data).some((vs) => (Array.isArray(vs) ? vs : [vs]).includes(tag))
+    );
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    saveAs(blob, `annotations_export.json`);
+  };
+
   return (
     <div className="p-6 space-y-4">
-      <h1 className="text-2xl font-bold">仪表盘</h1>
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold">仪表盘</h1>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={filteredExport}>过滤导出 JSON</Button>
+          <Button size="sm" variant="outline" onClick={adminBackupExport}>导出全量备份</Button>
+          <label className="inline-flex">
+            <input type="file" accept=".json" className="hidden" onChange={(e) => e.target.files?.[0] && restoreBackup(e.target.files[0])} />
+            <span className="cursor-pointer text-sm border rounded px-3 py-1.5 hover:bg-muted">恢复备份</span>
+          </label>
+        </div>
+      </div>
       <div className="grid grid-cols-4 gap-4">
         <StatCard label="总标注数" v={total} />
         <StatCard label="待审核" v={submitted} />
