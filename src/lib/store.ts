@@ -26,6 +26,9 @@ export interface FieldDef {
   options: string[];
   allowCustom?: boolean;
   required?: boolean;
+  /** Linkage: when this field's dependency value changes, only show options mapped here */
+  dependsOn?: string;
+  optionMap?: Record<string, string[]>; // depValue -> allowed options
 }
 
 export interface CraftPartConfig {
