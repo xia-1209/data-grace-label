@@ -122,11 +122,29 @@ export function AdminDatasets() {
 
   const exportZip = async (id: string) => {
     const ds = db.datasets.find((d) => d.id === id)!;
+    const tasks = db.tasks.filter((t) => t.datasetId === id);
     const zip = new JSZip();
     const csv = ["style_id,image_url,angle"];
     ds.styles.forEach((s) => s.images.forEach((im) => csv.push(`${s.styleId},${im.url},${im.angle || ""}`)));
     zip.file("styles.csv", csv.join("\n"));
     zip.file("dataset.json", JSON.stringify(ds, null, 2));
+    // labels: 仅导出已通过的最终标注
+    const labels = ds.styles.map((s) => {
+      const annos: Record<string, any> = {};
+      PERSPECTIVES.forEach((p) => {
+        const a = db.annotations.find((x) => tasks.find((t) => t.id === x.taskId) && x.styleId === s.id && x.perspective === p && x.status === "approved");
+        if (a) annos[p] = { data: a.data, craftPartGroups: a.craftPartGroups, customTags: a.customTags };
+      });
+      return { style_id: s.styleId, images: s.images, annotations: annos };
+    });
+    zip.file("labels.json", JSON.stringify(labels, null, 2));
+    const labelCsv = ["style_id,perspective,field,values"];
+    labels.forEach((l) => Object.entries(l.annotations).forEach(([p, v]: any) => {
+      Object.entries(v.data || {}).forEach(([fk, vals]: any) => {
+        labelCsv.push(`${l.style_id},${p},${fk},"${(Array.isArray(vals) ? vals : [vals]).join("|")}"`);
+      });
+    }));
+    zip.file("labels.csv", labelCsv.join("\n"));
     const blob = await zip.generateAsync({ type: "blob" });
     saveAs(blob, `${ds.name}.zip`);
   };

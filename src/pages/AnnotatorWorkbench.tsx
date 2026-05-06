@@ -243,6 +243,23 @@ export default function AnnotatorWorkbench() {
       <div className="border-b px-4 py-2 flex items-center gap-3 bg-card flex-wrap">
         <Link to="/annotator" className="text-sm text-primary">← 返回</Link>
         <div className="font-semibold">{task.name}</div>
+        <span className="text-xs px-2 py-0.5 rounded bg-muted">任务包：{dataset.name}</span>
+        {(() => {
+          const total = dataset.styles.length;
+          const done = dataset.styles.filter((s) => {
+            const st = styleStatus(s.id);
+            return st === "approved" || st === "submitted";
+          }).length;
+          const pct = total ? Math.round((done / total) * 100) : 0;
+          return (
+            <div className="flex items-center gap-2 text-xs">
+              <div className="w-32 h-1.5 rounded bg-muted overflow-hidden">
+                <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
+              </div>
+              <span>{done}/{total} ({pct}%)</span>
+            </div>
+          );
+        })()}
         <div className="ml-auto text-xs text-muted-foreground">Ctrl+S 草稿 · Ctrl+Enter 提交 · 30s 自动保存</div>
       </div>
 
@@ -332,15 +349,17 @@ export default function AnnotatorWorkbench() {
 
               {/* perspectives */}
               {PERSPECTIVES.map((p) => {
-                const editable = editablePerspectives.includes(p);
-                const draft = drafts[p] || emptyDraft();
                 const existing = getAnnotation(task.id, activeStyle.id, p);
+                const lockedByApproval = existing?.status === "approved";
+                const editable = editablePerspectives.includes(p) && !lockedByApproval;
+                const draft = drafts[p] || emptyDraft();
                 return (
                   <Card key={p} className={`p-4 ${editable ? "border-primary/30" : "bg-muted/40"}`}>
                     <div className="flex items-center gap-2 mb-3">
                       {editable ? <Pencil className="w-4 h-4 text-primary" /> : <Lock className="w-4 h-4 text-muted-foreground" />}
                       <h3 className="font-semibold">{PERSPECTIVE_LABEL[p]}</h3>
                       {existing && <StatusBadge s={existing.status} />}
+                      {lockedByApproval && <span className="text-[10px] text-green-700">已通过 · 只读</span>}
                       <Button size="sm" variant="ghost" className="ml-auto h-7 text-xs" onClick={() => setHistoryOpen(p)}>
                         <History className="w-3 h-3" /> 历史版本 ({existing?.history.length || 0})
                       </Button>
