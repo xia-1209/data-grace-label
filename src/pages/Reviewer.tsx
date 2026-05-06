@@ -35,27 +35,40 @@ export default function Reviewer() {
           <h1 className="text-2xl font-bold">待审核任务</h1>
           <Input placeholder="搜索任务…" value={search} onChange={(e) => setSearch(e.target.value)} className="w-64" />
         </div>
-        <div className="grid grid-cols-2 gap-4">
-          {myTasks.filter((t) => t.name.toLowerCase().includes(search.toLowerCase())).map((t) => {
-            const ds = db.datasets.find((d) => d.id === t.datasetId);
-            const pending = db.annotations.filter((a) => a.taskId === t.id && a.status === "submitted").length;
-            const approved = db.annotations.filter((a) => a.taskId === t.id && a.status === "approved").length;
-            const rejected = db.annotations.filter((a) => a.taskId === t.id && a.status === "rejected").length;
-            return (
-              <Card key={t.id} className="p-4 space-y-2">
-                <h3 className="font-semibold">{t.name}</h3>
-                <div className="text-xs text-muted-foreground">任务包：{ds?.name} · {ds?.styles.length || 0} 个款式</div>
-                <div className="flex gap-3 text-xs">
-                  <span className="text-blue-700">待审核 {pending}</span>
-                  <span className="text-green-700">通过 {approved}</span>
-                  <span className="text-red-700">打回 {rejected}</span>
-                </div>
-                <Button size="sm" onClick={() => setTaskId(t.id)}>进入审核</Button>
-              </Card>
-            );
-          })}
-          {myTasks.length === 0 && <p className="text-muted-foreground">暂无任务</p>}
-        </div>
+        {(() => {
+          const filtered = myTasks.filter((t) => t.name.toLowerCase().includes(search.toLowerCase()));
+          const groups = filtered.reduce<Record<string, typeof filtered>>((acc, t) => {
+            const lib = db.libraries.find((l) => l.key === t.libraryKey)?.name || t.libraryKey;
+            (acc[lib] = acc[lib] || []).push(t);
+            return acc;
+          }, {});
+          if (Object.keys(groups).length === 0) return <p className="text-muted-foreground">暂无任务</p>;
+          return Object.entries(groups).map(([libName, ts]) => (
+            <div key={libName} className="mb-6">
+              <h2 className="text-sm font-semibold mb-2 text-muted-foreground">{libName}（{ts.length}）</h2>
+              <div className="grid grid-cols-2 gap-4">
+                {ts.map((t) => {
+                  const ds = db.datasets.find((d) => d.id === t.datasetId);
+                  const pending = db.annotations.filter((a) => a.taskId === t.id && a.status === "submitted").length;
+                  const approved = db.annotations.filter((a) => a.taskId === t.id && a.status === "approved").length;
+                  const rejected = db.annotations.filter((a) => a.taskId === t.id && a.status === "rejected").length;
+                  return (
+                    <Card key={t.id} className="p-4 space-y-2">
+                      <h3 className="font-semibold">{t.name}</h3>
+                      <div className="text-xs text-muted-foreground">任务包：{ds?.name} · {ds?.styles.length || 0} 个条目</div>
+                      <div className="flex gap-3 text-xs">
+                        <span className="text-blue-700">待审核 {pending}</span>
+                        <span className="text-green-700">通过 {approved}</span>
+                        <span className="text-red-700">打回 {rejected}</span>
+                      </div>
+                      <Button size="sm" onClick={() => setTaskId(t.id)}>进入审核</Button>
+                    </Card>
+                  );
+                })}
+              </div>
+            </div>
+          ));
+        })()}
       </div>
     );
   }
