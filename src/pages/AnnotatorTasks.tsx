@@ -43,7 +43,7 @@ export default function AnnotatorTasks() {
                 <h3 className="font-semibold">{t.name}</h3>
                 <span className="text-xs text-muted-foreground">截止 {t.deadline}</span>
               </div>
-              <div className="text-sm text-muted-foreground">库：{lib?.name} · 数据集：{ds?.name}</div>
+              <div className="text-sm text-muted-foreground">库类型：<span className="font-medium text-foreground">{lib?.name}</span> · 数据集：{ds?.name}</div>
               <div className="text-xs">我的视角：{myPerspectives.join(", ")}</div>
               <div className="grid grid-cols-5 gap-1 text-xs">
                 <Stat label="未打标" value={cnt("not_started")} color="bg-muted" />
