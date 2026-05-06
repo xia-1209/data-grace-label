@@ -819,136 +819,295 @@ export function AdminLibraries() {
 // ---------------- Tag Pool ----------------
 export function AdminTagPool() {
   const db = useDB();
-  const [merging, setMerging] = useState<{ libKey: string; fieldKey: string } | null>(null);
-  const [mergeFrom, setMergeFrom] = useState<Set<string>>(new Set());
-  const [mergeTo, setMergeTo] = useState("");
-  const [filterByLog, setFilterByLog] = useState("");
+  const [tab, setTab] = useState<"pool" | "custom">("pool");
+  const [libKey, setLibKey] = useState(db.libraries[0]?.key || "");
+  const lib = db.libraries.find((l) => l.key === libKey);
+  const fields = (lib?.fields || []).filter((f) => f.type !== "text");
+  const [fieldKey, setFieldKey] = useState(fields[0]?.key || "");
+  const field = fields.find((f) => f.key === fieldKey) || fields[0];
 
-  const handle = (id: string, status: "approved" | "rejected") => {
+  const [newTag, setNewTag] = useState("");
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 12;
+  const [mergeFrom, setMergeFrom] = useState<Set<string>>(new Set());
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [mergeTo, setMergeTo] = useState("");
+
+  const usage = useMemo(() => {
+    const map: Record<string, number> = {};
+    db.annotations.forEach((a) => {
+      Object.entries(a.data).forEach(([fk, vs]) => {
+        const arr = Array.isArray(vs) ? vs : [vs];
+        arr.forEach((v) => { if (v) map[`${fk}::${v}`] = (map[`${fk}::${v}`] || 0) + 1; });
+      });
+    });
+    return map;
+  }, [db.annotations]);
+
+  if (!lib || !field) return <div className="p-6">无库</div>;
+
+  const filtered = field.options.filter((o) => o.toLowerCase().includes(search.toLowerCase()));
+  const sorted = [...filtered].sort((a, b) => (usage[`${field.key}::${b}`] || 0) - (usage[`${field.key}::${a}`] || 0));
+  const paged = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+
+  const addTag = () => {
+    const v = newTag.trim();
+    if (!v) return;
+    if (field.options.includes(v)) { toast.error("已存在"); return; }
+    const x = loadDB();
+    const li = x.libraries.findIndex((l) => l.key === libKey);
+    const fi = x.libraries[li].fields.findIndex((f) => f.key === fieldKey);
+    x.libraries[li].fields[fi].options.push(v);
+    saveDB(x);
+    log("tag_add", "admin", `${libKey}/${fieldKey}: +${v}`);
+    setNewTag("");
+    toast.success("已添加");
+  };
+
+  const editTag = (old: string) => {
+    const next = prompt("修改标签名", old);
+    if (!next || next === old) return;
+    if (field.options.includes(next)) { toast.error("名称重复"); return; }
+    const x = loadDB();
+    const li = x.libraries.findIndex((l) => l.key === libKey);
+    const fi = x.libraries[li].fields.findIndex((f) => f.key === fieldKey);
+    x.libraries[li].fields[fi].options = x.libraries[li].fields[fi].options.map((o) => o === old ? next : o);
+    x.annotations.forEach((a) => {
+      const cur = a.data[fieldKey];
+      if (Array.isArray(cur)) a.data[fieldKey] = cur.map((v) => v === old ? next : v);
+    });
+    saveDB(x);
+    log("tag_rename", "admin", `${libKey}/${fieldKey}: ${old} -> ${next}`);
+    toast.success("已修改");
+  };
+
+  const deleteTag = (val: string) => {
+    const used = usage[`${field.key}::${val}`] || 0;
+    if (used > 0) {
+      const choice = prompt(`「${val}」已被使用 ${used} 次。输入 "force" 强制删除（移除标注中该标签）；输入 "disable" 仅停用（保留历史，从选项移除）；其他取消。`);
+      if (choice !== "force" && choice !== "disable") return;
+      const x = loadDB();
+      const li = x.libraries.findIndex((l) => l.key === libKey);
+      const fi = x.libraries[li].fields.findIndex((f) => f.key === fieldKey);
+      x.libraries[li].fields[fi].options = x.libraries[li].fields[fi].options.filter((o) => o !== val);
+      if (choice === "force") {
+        x.annotations.forEach((a) => {
+          const cur = a.data[fieldKey];
+          if (Array.isArray(cur)) a.data[fieldKey] = cur.filter((v) => v !== val);
+        });
+      }
+      saveDB(x);
+      log(choice === "force" ? "tag_force_delete" : "tag_disable", "admin", `${libKey}/${fieldKey}: ${val}`);
+      toast.success("操作完成");
+    } else {
+      if (!confirm(`删除「${val}」？`)) return;
+      const x = loadDB();
+      const li = x.libraries.findIndex((l) => l.key === libKey);
+      const fi = x.libraries[li].fields.findIndex((f) => f.key === fieldKey);
+      x.libraries[li].fields[fi].options = x.libraries[li].fields[fi].options.filter((o) => o !== val);
+      saveDB(x);
+      log("tag_delete", "admin", `${libKey}/${fieldKey}: ${val}`);
+    }
+  };
+
+  const importTags = async (file: File, mode: "append" | "replace") => {
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows: any[] = XLSX.utils.sheet_to_json(ws, { header: 1 });
+      const tags = rows.flat().map((v) => String(v).trim()).filter(Boolean);
+      if (tags.length === 0) { toast.error("文件为空或解析失败：未读到任何标签"); return; }
+      const x = loadDB();
+      const li = x.libraries.findIndex((l) => l.key === libKey);
+      const fi = x.libraries[li].fields.findIndex((f) => f.key === fieldKey);
+      if (mode === "replace") x.libraries[li].fields[fi].options = Array.from(new Set(tags));
+      else {
+        const cur = new Set(x.libraries[li].fields[fi].options);
+        tags.forEach((t) => cur.add(t));
+        x.libraries[li].fields[fi].options = Array.from(cur);
+      }
+      saveDB(x);
+      log("tag_import", "admin", `${libKey}/${fieldKey}: ${mode} ${tags.length}`);
+      toast.success(`已${mode === "replace" ? "覆盖" : "追加"} ${tags.length} 个标签`);
+    } catch (e: any) { toast.error(`解析失败：${e.message}`); }
+  };
+
+  const exportTags = () => {
+    const data = field.options.map((o) => ({ tag: o, usage: usage[`${field.key}::${o}`] || 0 }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "tags");
+    const buf = XLSX.write(wb, { type: "array", bookType: "xlsx" });
+    saveAs(new Blob([buf]), `${libKey}_${fieldKey}_tags.xlsx`);
+  };
+
+  const doMerge = () => {
+    if (!mergeTo || mergeFrom.size === 0) return;
+    if (!confirm(`将 ${[...mergeFrom].join(", ")} 合并为「${mergeTo}」？标注数据会迁移。`)) return;
+    const x = loadDB();
+    const li = x.libraries.findIndex((l) => l.key === libKey);
+    const fi = x.libraries[li].fields.findIndex((f) => f.key === fieldKey);
+    const f = x.libraries[li].fields[fi];
+    if (!f.options.includes(mergeTo)) f.options.push(mergeTo);
+    f.options = f.options.filter((o) => !mergeFrom.has(o) || o === mergeTo);
+    x.annotations.forEach((a) => {
+      const cur = a.data[fieldKey];
+      if (Array.isArray(cur)) a.data[fieldKey] = Array.from(new Set(cur.map((v) => mergeFrom.has(v) ? mergeTo : v)));
+      a.history.forEach((h) => {
+        const hc = h.data?.[fieldKey];
+        if (Array.isArray(hc)) h.data![fieldKey] = Array.from(new Set(hc.map((v) => mergeFrom.has(v) ? mergeTo : v)));
+      });
+    });
+    saveDB(x);
+    log("tag_merge", "admin", `${libKey}/${fieldKey}: ${[...mergeFrom].join(",")} -> ${mergeTo}`);
+    toast.success("已合并");
+    setMergeOpen(false); setMergeFrom(new Set()); setMergeTo("");
+  };
+
+  // Custom tag review
+  const handleCustom = (id: string, status: "approved" | "rejected") => {
     const x = loadDB();
     const i = x.tagRequests.findIndex((t) => t.id === id);
     if (i < 0) return;
     x.tagRequests[i].status = status;
     if (status === "approved") {
       const r = x.tagRequests[i];
-      const lib = x.libraries.find((l) => l.key === r.libraryKey);
-      const f = lib?.fields.find((f) => f.key === r.fieldKey);
+      const lb = x.libraries.find((l) => l.key === r.libraryKey);
+      const f = lb?.fields.find((f) => f.key === r.fieldKey);
       if (f && !f.options.includes(r.value)) f.options.push(r.value);
     }
     saveDB(x);
-  };
-
-  // Tag usage stats
-  const usage = useMemo(() => {
-    const map: Record<string, number> = {};
-    db.annotations.forEach((a) => {
-      Object.entries(a.data).forEach(([fk, vs]) => {
-        const arr = Array.isArray(vs) ? vs : [vs];
-        arr.forEach((v) => {
-          if (!v) return;
-          const k = `${fk}::${v}`;
-          map[k] = (map[k] || 0) + 1;
-        });
-      });
-    });
-    return map;
-  }, [db.annotations]);
-
-  const doMerge = () => {
-    if (!merging || !mergeTo || mergeFrom.size === 0) return;
-    if (!confirm(`将 ${[...mergeFrom].join(", ")} 合并为「${mergeTo}」？标注数据会迁移。`)) return;
-    const x = loadDB();
-    const lib = x.libraries.find((l) => l.key === merging.libKey)!;
-    const f = lib.fields.find((ff) => ff.key === merging.fieldKey)!;
-    if (!f.options.includes(mergeTo)) f.options.push(mergeTo);
-    f.options = f.options.filter((o) => !mergeFrom.has(o) || o === mergeTo);
-    x.annotations.forEach((a) => {
-      const cur = a.data[f.key];
-      if (Array.isArray(cur)) {
-        a.data[f.key] = Array.from(new Set(cur.map((v) => mergeFrom.has(v) ? mergeTo : v)));
-      }
-    });
-    saveDB(x);
-    log("merge_tags", "admin", `${merging.libKey}/${f.key}: ${[...mergeFrom].join(",")} -> ${mergeTo}`);
-    toast.success("已合并");
-    setMerging(null); setMergeFrom(new Set()); setMergeTo("");
+    log(`custom_tag_${status}`, "admin", `${x.tagRequests[i].libraryKey}/${x.tagRequests[i].fieldKey}: ${x.tagRequests[i].value}`);
   };
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-4">
+    <div className="p-6 max-w-6xl mx-auto space-y-4">
       <h1 className="text-2xl font-bold">标签池管理</h1>
+      <div className="flex gap-2 border-b">
+        <button onClick={() => setTab("pool")} className={`px-4 py-2 text-sm ${tab === "pool" ? "border-b-2 border-primary font-semibold" : ""}`}>固定标签池</button>
+        <button onClick={() => setTab("custom")} className={`px-4 py-2 text-sm ${tab === "custom" ? "border-b-2 border-primary font-semibold" : ""}`}>
+          自定义标签审核 ({db.tagRequests.filter((r) => r.status === "pending").length})
+        </button>
+      </div>
 
-      <Card className="p-4">
-        <h3 className="font-semibold mb-2">自定义标签申请</h3>
-        {db.tagRequests.length === 0 && <div className="text-muted-foreground text-sm">暂无</div>}
-        {db.tagRequests.map((r) => (
-          <div key={r.id} className="flex items-center justify-between border-t py-2">
-            <div className="text-sm">{r.libraryKey} / {r.fieldKey}：<b>{r.value}</b> <span className="text-xs text-muted-foreground">[{r.status}]</span></div>
-            {r.status === "pending" && (
-              <div className="flex gap-2">
-                <Button size="sm" onClick={() => handle(r.id, "approved")}>批准</Button>
-                <Button size="sm" variant="outline" onClick={() => handle(r.id, "rejected")}>拒绝</Button>
+      {tab === "pool" && (
+        <>
+          <Card className="p-4 space-y-3">
+            <div className="flex gap-2 items-center flex-wrap">
+              <select className="border rounded px-2 py-1.5 text-sm" value={libKey} onChange={(e) => { setLibKey(e.target.value); setPage(0); }}>
+                {db.libraries.map((l) => <option key={l.key} value={l.key}>{l.name}</option>)}
+              </select>
+              <select className="border rounded px-2 py-1.5 text-sm" value={fieldKey} onChange={(e) => { setFieldKey(e.target.value); setPage(0); }}>
+                {fields.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+              </select>
+              <Input placeholder="搜索标签…" value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} className="w-48 h-8" />
+              <div className="flex-1" />
+              <Button size="sm" variant="outline" onClick={exportTags}>导出 Excel</Button>
+              <label className="text-xs border rounded px-2 py-1.5 cursor-pointer hover:bg-muted">
+                追加导入<input type="file" accept=".csv,.xlsx" className="hidden" onChange={(e) => e.target.files?.[0] && importTags(e.target.files[0], "append")} />
+              </label>
+              <label className="text-xs border rounded px-2 py-1.5 cursor-pointer hover:bg-muted">
+                覆盖导入<input type="file" accept=".csv,.xlsx" className="hidden" onChange={(e) => e.target.files?.[0] && importTags(e.target.files[0], "replace")} />
+              </label>
+              <Button size="sm" variant="outline" disabled={mergeFrom.size < 2} onClick={() => setMergeOpen(true)}>合并 ({mergeFrom.size})</Button>
+            </div>
+            <div className="flex gap-2">
+              <Input placeholder="新增标签名" value={newTag} onChange={(e) => setNewTag(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addTag()} className="h-8" />
+              <Button size="sm" onClick={addTag}>新增</Button>
+            </div>
+
+            <table className="w-full text-sm">
+              <thead className="text-left text-xs text-muted-foreground border-b">
+                <tr>
+                  <th className="py-1 w-8"></th>
+                  <th>标签</th>
+                  <th>使用次数</th>
+                  <th className="text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paged.map((o) => (
+                  <tr key={o} className="border-b">
+                    <td><input type="checkbox" checked={mergeFrom.has(o)} onChange={(e) => {
+                      const s = new Set(mergeFrom);
+                      if (e.target.checked) s.add(o); else s.delete(o);
+                      setMergeFrom(s);
+                    }} /></td>
+                    <td className="py-1.5">{o}</td>
+                    <td>{usage[`${field.key}::${o}`] || 0}</td>
+                    <td className="text-right">
+                      <Button size="sm" variant="ghost" className="h-7" onClick={() => editTag(o)}>编辑</Button>
+                      <Button size="sm" variant="ghost" className="h-7 text-destructive" onClick={() => deleteTag(o)}>删除</Button>
+                    </td>
+                  </tr>
+                ))}
+                {paged.length === 0 && <tr><td colSpan={4} className="text-center text-muted-foreground py-4">暂无</td></tr>}
+              </tbody>
+            </table>
+            <div className="flex justify-between items-center text-xs">
+              <span>共 {sorted.length} 个</span>
+              <div className="flex gap-2 items-center">
+                <Button size="sm" variant="outline" disabled={page === 0} onClick={() => setPage(page - 1)}>上一页</Button>
+                <span>{page + 1} / {totalPages}</span>
+                <Button size="sm" variant="outline" disabled={page + 1 >= totalPages} onClick={() => setPage(page + 1)}>下一页</Button>
               </div>
-            )}
-          </div>
-        ))}
-      </Card>
+            </div>
+          </Card>
 
-      <Card className="p-4">
-        <h3 className="font-semibold mb-2">固定选项 + 使用统计 + 合并</h3>
-        {db.libraries.map((lib) => (
-          <div key={lib.key} className="border-t pt-2 mt-2">
-            <div className="font-medium text-sm mb-1">{lib.name}</div>
-            {lib.fields.filter(f => f.type !== "text").map((f) => (
-              <div key={f.key} className="ml-2 mb-2">
-                <div className="text-xs text-muted-foreground flex items-center gap-2">
-                  <span>{f.label} ({f.key})</span>
-                  <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => { setMerging({ libKey: lib.key, fieldKey: f.key }); setMergeFrom(new Set()); setMergeTo(""); }}>合并选项</Button>
-                </div>
-                <div className="flex flex-wrap gap-1 mt-1">
-                  {f.options.map((o) => (
-                    <span key={o} className="text-xs px-2 py-0.5 bg-muted rounded">
-                      {o} <span className="text-muted-foreground">({usage[`${f.key}::${o}`] || 0})</span>
-                    </span>
-                  ))}
-                </div>
+          <Dialog open={mergeOpen} onOpenChange={setMergeOpen}>
+            <DialogContent>
+              <DialogHeader><DialogTitle>合并标签</DialogTitle></DialogHeader>
+              <div className="text-sm space-y-2">
+                <div>源标签：{[...mergeFrom].join(", ")}</div>
+                <div>合并为：</div>
+                <Input value={mergeTo} onChange={(e) => setMergeTo(e.target.value)} placeholder="目标标签名" />
               </div>
-            ))}
-          </div>
-        ))}
-      </Card>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setMergeOpen(false)}>取消</Button>
+                <Button onClick={doMerge}>确认合并</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </>
+      )}
 
-      <Dialog open={!!merging} onOpenChange={(o) => !o && setMerging(null)}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>合并标签</DialogTitle></DialogHeader>
-          {merging && (() => {
-            const lib = db.libraries.find(l => l.key === merging.libKey)!;
-            const f = lib.fields.find(ff => ff.key === merging.fieldKey)!;
+      {tab === "custom" && (
+        <Card className="p-4 space-y-2">
+          {db.tagRequests.length === 0 && <div className="text-muted-foreground text-sm">暂无</div>}
+          {db.libraries.map((lb) => {
+            const reqs = db.tagRequests.filter((r) => r.libraryKey === lb.key);
+            if (reqs.length === 0) return null;
             return (
-              <div className="space-y-2 text-sm">
-                <div>选择源标签（多选）：</div>
-                <div className="flex flex-wrap gap-2">
-                  {f.options.map((o) => (
-                    <label key={o} className="flex items-center gap-1 text-xs border rounded px-2 py-1">
-                      <input type="checkbox" checked={mergeFrom.has(o)} onChange={(e) => {
-                        const s = new Set(mergeFrom);
-                        if (e.target.checked) s.add(o); else s.delete(o);
-                        setMergeFrom(s);
-                      }} />{o}
-                    </label>
-                  ))}
-                </div>
-                <div>合并为目标标签：</div>
-                <Input value={mergeTo} onChange={(e) => setMergeTo(e.target.value)} placeholder="新标签名（可与源标签重名）" />
+              <div key={lb.key} className="border-t pt-2">
+                <div className="font-medium text-sm">{lb.name}</div>
+                {lb.fields.map((f) => {
+                  const fr = reqs.filter((r) => r.fieldKey === f.key);
+                  if (fr.length === 0) return null;
+                  return (
+                    <div key={f.key} className="ml-2 mt-1">
+                      <div className="text-xs text-muted-foreground">{f.label}</div>
+                      {fr.map((r) => (
+                        <div key={r.id} className="flex items-center justify-between border-b py-1.5 text-sm">
+                          <span><b>{r.value}</b> <span className="text-xs text-muted-foreground">by {r.byPid} · [{r.status}]</span></span>
+                          {r.status === "pending" && (
+                            <div className="flex gap-2">
+                              <Button size="sm" onClick={() => handleCustom(r.id, "approved")}>批准</Button>
+                              <Button size="sm" variant="outline" onClick={() => handleCustom(r.id, "rejected")}>拒绝</Button>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
               </div>
             );
-          })()}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setMerging(null)}>取消</Button>
-            <Button onClick={doMerge}>确认合并</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          })}
+        </Card>
+      )}
     </div>
   );
 }
