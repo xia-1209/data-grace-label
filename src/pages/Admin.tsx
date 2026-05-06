@@ -1215,18 +1215,34 @@ export function AdminLogs() {
   const db = useDB();
   const [filterAction, setFilterAction] = useState("");
   const [filterPid, setFilterPid] = useState("");
-  const filtered = db.logs.filter((l) =>
-    (!filterAction || l.action.includes(filterAction)) && (!filterPid || l.pid.includes(filterPid))
-  );
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [page, setPage] = useState(0);
+  const PAGE = 30;
+  const actions = useMemo(() => Array.from(new Set(db.logs.map((l) => l.action))), [db.logs]);
+  const filtered = db.logs.filter((l) => {
+    if (filterAction && l.action !== filterAction) return false;
+    if (filterPid && !l.pid.includes(filterPid)) return false;
+    if (fromDate && l.ts < new Date(fromDate).getTime()) return false;
+    if (toDate && l.ts > new Date(toDate).getTime() + 86400000) return false;
+    return true;
+  });
+  const paged = filtered.slice(page * PAGE, (page + 1) * PAGE);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE));
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <h1 className="text-2xl font-bold mb-3">操作日志</h1>
-      <div className="flex gap-2 mb-3">
-        <Input placeholder="按操作类型过滤" value={filterAction} onChange={(e) => setFilterAction(e.target.value)} className="w-48" />
-        <Input placeholder="按 PID 过滤" value={filterPid} onChange={(e) => setFilterPid(e.target.value)} className="w-48" />
+      <div className="flex gap-2 mb-3 flex-wrap">
+        <select className="border rounded px-2 py-1.5 text-sm" value={filterAction} onChange={(e) => { setFilterAction(e.target.value); setPage(0); }}>
+          <option value="">所有操作类型</option>
+          {actions.map((a) => <option key={a} value={a}>{a}</option>)}
+        </select>
+        <Input placeholder="按 PID 过滤" value={filterPid} onChange={(e) => { setFilterPid(e.target.value); setPage(0); }} className="w-40" />
+        <Input type="date" value={fromDate} onChange={(e) => { setFromDate(e.target.value); setPage(0); }} className="w-40" />
+        <Input type="date" value={toDate} onChange={(e) => { setToDate(e.target.value); setPage(0); }} className="w-40" />
       </div>
-      <Card className="p-4 max-h-[70vh] overflow-auto">
-        {filtered.map((l) => (
+      <Card className="p-4 max-h-[60vh] overflow-auto">
+        {paged.map((l) => (
           <div key={l.id} className="border-b py-1 text-xs flex gap-3">
             <span className="text-muted-foreground">{new Date(l.ts).toLocaleString()}</span>
             <span className="font-medium">{l.pid}</span>
@@ -1234,8 +1250,16 @@ export function AdminLogs() {
             <span className="text-muted-foreground">{l.detail}</span>
           </div>
         ))}
-        {filtered.length === 0 && <div className="text-sm text-muted-foreground">暂无日志</div>}
+        {paged.length === 0 && <div className="text-sm text-muted-foreground">暂无日志</div>}
       </Card>
+      <div className="flex justify-between items-center text-xs mt-2">
+        <span>共 {filtered.length} 条</span>
+        <div className="flex gap-2 items-center">
+          <Button size="sm" variant="outline" disabled={page === 0} onClick={() => setPage(page - 1)}>上一页</Button>
+          <span>{page + 1} / {totalPages}</span>
+          <Button size="sm" variant="outline" disabled={page + 1 >= totalPages} onClick={() => setPage(page + 1)}>下一页</Button>
+        </div>
+      </div>
     </div>
   );
 }
