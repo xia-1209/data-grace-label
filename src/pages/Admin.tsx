@@ -928,28 +928,28 @@ function DatasetDetail({ id, onClose, exportZip, exportAnnotations }: {
   const ds = db.datasets.find((d) => d.id === id);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
-  const [viewImg, setViewImg] = useState<string | null>(null);
+  const [viewSty, setViewSty] = useState<string | null>(null);
   if (!ds) return <div className="p-6">数据集不存在</div>;
 
-  const filtered = ds.images.filter((i) => i.filename.toLowerCase().includes(search.toLowerCase()));
+  const filtered = ds.styles.filter((s) => s.styleId.toLowerCase().includes(search.toLowerCase()));
 
   const batchDelete = () => {
     if (selected.size === 0) return;
-    if (!confirm(`确认删除 ${selected.size} 张图片及关联标注？`)) return;
+    if (!confirm(`确认删除 ${selected.size} 个款式及关联标注？`)) return;
     const x = loadDB();
     const di = x.datasets.findIndex((d) => d.id === id);
-    x.datasets[di].images = x.datasets[di].images.filter((i) => !selected.has(i.id));
-    x.annotations = x.annotations.filter((a) => !selected.has(a.imageId));
+    x.datasets[di].styles = x.datasets[di].styles.filter((s) => !selected.has(s.id));
+    x.annotations = x.annotations.filter((a) => !selected.has(a.styleId));
     saveDB(x);
     setSelected(new Set());
     toast.success("已批量删除");
   };
 
-  const exportImageJson = (imgId: string) => {
-    const annos = db.annotations.filter((a) => a.imageId === imgId);
-    const img = ds.images.find((i) => i.id === imgId);
-    const blob = new Blob([JSON.stringify({ image: img, annotations: annos }, null, 2)], { type: "application/json" });
-    saveAs(blob, `${img?.filename || imgId}.json`);
+  const exportStyleJson = (sId: string) => {
+    const annos = db.annotations.filter((a) => a.styleId === sId);
+    const sty = ds.styles.find((s) => s.id === sId);
+    const blob = new Blob([JSON.stringify({ style: sty, annotations: annos }, null, 2)], { type: "application/json" });
+    saveAs(blob, `${sty?.styleId || sId}.json`);
   };
 
   return (
@@ -958,48 +958,54 @@ function DatasetDetail({ id, onClose, exportZip, exportAnnotations }: {
       <div className="flex justify-between items-center my-3">
         <h1 className="text-2xl font-bold">{ds.name}</h1>
         <div className="flex gap-2">
-          <Input placeholder="搜索文件名" value={search} onChange={(e) => setSearch(e.target.value)} className="w-48" />
+          <Input placeholder="搜索款式ID" value={search} onChange={(e) => setSearch(e.target.value)} className="w-48" />
           <Button size="sm" onClick={() => exportZip(ds.id)}>导出 ZIP</Button>
           <Button size="sm" variant="outline" onClick={() => exportAnnotations(ds.id)}>导出标注 JSON</Button>
         </div>
       </div>
       {selected.size > 0 && (
         <div className="bg-card border rounded p-2 mb-3 flex gap-2 items-center">
-          <span className="text-sm">已选 {selected.size} 张</span>
+          <span className="text-sm">已选 {selected.size} 个</span>
           <Button size="sm" variant="destructive" onClick={batchDelete}>批量删除</Button>
           <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>清空</Button>
         </div>
       )}
       <div className="grid grid-cols-3 gap-3">
-        {filtered.map((img) => (
-          <Card key={img.id} className="p-2 relative">
+        {filtered.map((s) => (
+          <Card key={s.id} className="p-2 relative">
             <input type="checkbox" className="absolute top-2 left-2 z-10"
-              checked={selected.has(img.id)}
+              checked={selected.has(s.id)}
               onChange={(e) => {
-                const s = new Set(selected);
-                if (e.target.checked) s.add(img.id); else s.delete(img.id);
-                setSelected(s);
+                const set = new Set(selected);
+                if (e.target.checked) set.add(s.id); else set.delete(s.id);
+                setSelected(set);
               }} />
-            <img src={img.url} className="w-full h-40 object-cover rounded cursor-pointer" alt="" onClick={() => setViewImg(img.id)} />
-            <div className="text-xs mt-1 truncate">{img.filename}</div>
+            <div className="grid grid-cols-2 gap-1 cursor-pointer" onClick={() => setViewSty(s.id)}>
+              {s.images.slice(0, 4).map((im, i) => (
+                <img key={i} src={im.url} className="w-full h-20 object-cover rounded" alt="" />
+              ))}
+            </div>
+            <div className="text-xs mt-1 font-medium">{s.styleId} <span className="text-muted-foreground">({s.images.length} 图)</span></div>
           </Card>
         ))}
       </div>
 
-      <Dialog open={!!viewImg} onOpenChange={(o) => !o && setViewImg(null)}>
+      <Dialog open={!!viewSty} onOpenChange={(o) => !o && setViewSty(null)}>
         <DialogContent className="max-w-3xl">
-          <DialogHeader><DialogTitle>图片标注详情</DialogTitle></DialogHeader>
-          {viewImg && (() => {
-            const img = ds.images.find((i) => i.id === viewImg)!;
-            const annos = db.annotations.filter((a) => a.imageId === viewImg);
+          <DialogHeader><DialogTitle>款式标注详情</DialogTitle></DialogHeader>
+          {viewSty && (() => {
+            const sty = ds.styles.find((s) => s.id === viewSty)!;
+            const annos = db.annotations.filter((a) => a.styleId === viewSty);
             return (
               <div className="space-y-3 max-h-[70vh] overflow-auto">
-                <div className="flex gap-3">
-                  <img src={img.url} className="w-40 h-40 object-cover rounded" alt="" />
-                  <div className="text-sm">
-                    <div><b>{img.filename}</b></div>
-                    <Button size="sm" variant="outline" className="mt-2" onClick={() => exportImageJson(viewImg)}>导出该图标注 JSON</Button>
-                  </div>
+                <div className="flex gap-3 flex-wrap">
+                  {sty.images.map((im, i) => (
+                    <img key={i} src={im.url} className="w-32 h-32 object-cover rounded" alt="" />
+                  ))}
+                </div>
+                <div>
+                  <b>{sty.styleId}</b>
+                  <Button size="sm" variant="outline" className="ml-2" onClick={() => exportStyleJson(viewSty)}>导出该款式标注 JSON</Button>
                 </div>
                 {PERSPECTIVES.map((p) => {
                   const a = annos.find((x) => x.perspective === p);
