@@ -349,15 +349,17 @@ export default function AnnotatorWorkbench() {
 
               {/* perspectives */}
               {PERSPECTIVES.map((p) => {
-                const editable = editablePerspectives.includes(p);
-                const draft = drafts[p] || emptyDraft();
                 const existing = getAnnotation(task.id, activeStyle.id, p);
+                const lockedByApproval = existing?.status === "approved";
+                const editable = editablePerspectives.includes(p) && !lockedByApproval;
+                const draft = drafts[p] || emptyDraft();
                 return (
                   <Card key={p} className={`p-4 ${editable ? "border-primary/30" : "bg-muted/40"}`}>
                     <div className="flex items-center gap-2 mb-3">
                       {editable ? <Pencil className="w-4 h-4 text-primary" /> : <Lock className="w-4 h-4 text-muted-foreground" />}
                       <h3 className="font-semibold">{PERSPECTIVE_LABEL[p]}</h3>
                       {existing && <StatusBadge s={existing.status} />}
+                      {lockedByApproval && <span className="text-[10px] text-green-700">已通过 · 只读</span>}
                       <Button size="sm" variant="ghost" className="ml-auto h-7 text-xs" onClick={() => setHistoryOpen(p)}>
                         <History className="w-3 h-3" /> 历史版本 ({existing?.history.length || 0})
                       </Button>
