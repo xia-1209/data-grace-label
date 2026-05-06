@@ -335,90 +335,109 @@ export default function AnnotatorWorkbench() {
           {!activeStyle ? (
             <div className="p-6 text-muted-foreground">请从左侧选择一个款式</div>
           ) : (
-            <div className="p-4 space-y-4">
-              {/* style header + image switcher */}
-              <Card className="p-3">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="font-bold text-lg">{activeStyle.styleId}</div>
-                  <span className="text-xs text-muted-foreground">{activeStyle.images.length} 张图片</span>
-                </div>
-                {isComment ? (
-                  <textarea placeholder="客户评语文本…" className="border rounded p-2 text-sm w-full h-24 bg-background" />
-                ) : activeStyle.images.length > 0 ? (
-                  <div className="flex gap-3">
-                    <img src={activeStyle.images[imgIdx]?.url} alt="" className="w-72 h-72 object-contain bg-muted rounded" />
-                    <div className="flex flex-col gap-1 overflow-auto max-h-72">
-                      {activeStyle.images.map((im, i) => (
-                        <button key={i} onClick={() => setImgIdx(i)}
-                          className={`border rounded p-1 ${imgIdx === i ? "border-primary ring-2 ring-primary/30" : ""}`}>
-                          <img src={im.url} className="w-16 h-16 object-cover rounded" alt="" />
-                          <div className="text-[10px] mt-0.5 text-center">{im.angle || `图${i + 1}`}</div>
-                        </button>
-                      ))}
-                    </div>
+            <>
+              {/* Image column */}
+              <div className="w-[35%] min-w-[280px] border-r overflow-auto p-4 bg-background">
+                <Card className="p-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="font-bold">{activeStyle.styleId}</div>
+                    <span className="text-xs text-muted-foreground">{activeStyle.images.length} 图</span>
                   </div>
-                ) : (
-                  <div className="text-muted-foreground text-sm">该款式暂无图片</div>
-                )}
-              </Card>
+                  {isComment ? (
+                    <textarea placeholder="客户评语文本…" className="border rounded p-2 text-sm w-full h-32 bg-background" />
+                  ) : activeStyle.images.length > 0 ? (
+                    <>
+                      <img src={activeStyle.images[imgIdx]?.url} alt=""
+                        className="w-full aspect-square object-contain bg-muted rounded mb-2 cursor-zoom-in"
+                        onClick={() => window.open(activeStyle.images[imgIdx]?.url, "_blank")} />
+                      <div className="flex gap-1 flex-wrap">
+                        {activeStyle.images.map((im, i) => (
+                          <button key={i} onClick={() => setImgIdx(i)}
+                            className={`border rounded p-0.5 ${imgIdx === i ? "border-primary ring-2 ring-primary/30" : ""}`}>
+                            <img src={im.url} className="w-14 h-14 object-cover rounded" alt="" />
+                            <div className="text-[10px] mt-0.5 text-center">{im.angle || `图${i + 1}`}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="text-muted-foreground text-sm">暂无图片</div>
+                  )}
+                </Card>
+              </div>
 
-              {/* perspectives */}
-              {PERSPECTIVES.map((p) => {
-                const existing = getAnnotation(task.id, activeStyle.id, p);
-                const lockedByApproval = existing?.status === "approved";
-                const editable = editablePerspectives.includes(p) && !lockedByApproval;
-                const draft = drafts[p] || emptyDraft();
-                return (
-                  <Card key={p} className={`p-4 ${editable ? "border-primary/30" : "bg-muted/40"}`}>
-                    <div className="flex items-center gap-2 mb-3">
-                      {editable ? <Pencil className="w-4 h-4 text-primary" /> : <Lock className="w-4 h-4 text-muted-foreground" />}
-                      <h3 className="font-semibold">{PERSPECTIVE_LABEL[p]}</h3>
-                      {existing && <StatusBadge s={existing.status} />}
-                      {lockedByApproval && <span className="text-[10px] text-green-700">已通过 · 只读</span>}
-                      <Button size="sm" variant="ghost" className="ml-auto h-7 text-xs" onClick={() => setHistoryOpen(p)}>
-                        <History className="w-3 h-3" /> 历史版本 ({existing?.history.length || 0})
-                      </Button>
-                    </div>
-                    {existing?.rejectReason && (
-                      <div className="text-xs text-destructive bg-destructive/10 p-2 rounded mb-2">打回原因：{existing.rejectReason}</div>
-                    )}
-                    <PerspectiveForm library={library} draft={draft} editable={editable} onChange={(fn) => updateDraft(p, fn)} />
-                  </Card>
-                );
-              })}
-            </div>
+              {/* Form column */}
+              <div className="flex-1 overflow-auto p-4 space-y-3">
+                {PERSPECTIVES.map((p) => {
+                  const existing = getAnnotation(task.id, activeStyle.id, p);
+                  const lockedByApproval = existing?.status === "approved";
+                  const editable = editablePerspectives.includes(p) && !lockedByApproval;
+                  const draft = drafts[p] || emptyDraft();
+                  return (
+                    <Card key={p} className={`p-4 ${editable ? "border-primary/30" : "bg-muted/40"}`}>
+                      <div className="flex items-center gap-2 mb-3">
+                        {editable ? <Pencil className="w-4 h-4 text-primary" /> : <Lock className="w-4 h-4 text-muted-foreground" />}
+                        <h3 className="font-semibold">{PERSPECTIVE_LABEL[p]}</h3>
+                        {existing && <StatusBadge s={existing.status} />}
+                        {lockedByApproval && <span className="text-[10px] text-success">已通过 · 只读</span>}
+                        <Button size="sm" variant="ghost" className="ml-auto h-7 text-xs" onClick={() => setHistoryOpen(p)}>
+                          <History className="w-3 h-3" /> 历史 ({existing?.history.length || 0})
+                        </Button>
+                      </div>
+                      {existing?.rejectReason && (
+                        <div className="text-xs text-destructive bg-destructive/10 p-2 rounded mb-2">打回原因：{existing.rejectReason}</div>
+                      )}
+                      <PerspectiveForm library={library} draft={draft} editable={editable} onChange={(fn) => updateDraft(p, fn)} />
+                    </Card>
+                  );
+                })}
+              </div>
+            </>
           )}
         </div>
 
-        {/* Right helper panel */}
-        <div className="w-64 border-l bg-card overflow-auto p-3 space-y-3 text-sm">
-          <Button size="sm" variant="outline" className="w-full" onClick={() => setShowRules(true)}>
-            <BookOpen className="w-3 h-3" /> 标注规范
-          </Button>
-          <div>
-            <div className="font-medium mb-1">参考图库</div>
-            <div className="grid grid-cols-2 gap-1">
-              {dataset.styles.filter((s) => s.id !== activeStyle?.id).slice(0, 4).flatMap((s) => s.images.slice(0, 1)).map((im, i) => (
-                <img key={i} src={im.url} className="w-full h-16 object-cover rounded cursor-zoom-in" onClick={() => window.open(im.url, "_blank")} alt="" />
-              ))}
+        {/* Right helper panel (collapsible) */}
+        <div className={`${rightCollapsed ? "w-10" : "w-64"} border-l bg-card overflow-auto transition-all relative shrink-0`}>
+          <button onClick={() => setRightCollapsed(!rightCollapsed)}
+            className="absolute -left-3 top-3 z-10 bg-card border rounded-full w-6 h-6 flex items-center justify-center hover:bg-muted shadow-sm">
+            {rightCollapsed ? <PanelRightOpen className="w-3 h-3" /> : <PanelRightClose className="w-3 h-3" />}
+          </button>
+          {rightCollapsed ? (
+            <div className="flex flex-col items-center pt-4 gap-3">
+              <BookOpen className="w-4 h-4 text-muted-foreground" title="标注规范" />
+              <span className="rotate-90 text-[10px] text-muted-foreground whitespace-nowrap mt-6">辅助面板</span>
             </div>
-          </div>
-          <div>
-            <div className="font-medium mb-1">本款式自定义标签</div>
-            <div className="flex flex-wrap gap-1">
-              {Object.values(drafts).flatMap((d) => d?.customTags || []).map((t, i) => (
-                <span key={i} className="text-xs px-2 py-0.5 rounded bg-accent/30">{t}</span>
-              ))}
-            </div>
-          </div>
-          {library.craftPart && (
-            <div>
-              <div className="font-medium mb-1">工艺-部位参考</div>
-              <div className="text-xs space-y-0.5 text-muted-foreground">
-                {Object.entries(library.craftPart.rules).map(([c, ps]) => (
-                  <div key={c}><b className="text-foreground">{c}</b>: {ps.join(", ")}</div>
-                ))}
+          ) : (
+            <div className="p-3 space-y-3 text-sm">
+              <Button size="sm" variant="outline" className="w-full" onClick={() => setShowRules(true)}>
+                <BookOpen className="w-3 h-3" /> 标注规范
+              </Button>
+              <div>
+                <div className="font-medium mb-1">参考图库</div>
+                <div className="grid grid-cols-2 gap-1">
+                  {dataset.styles.filter((s) => s.id !== activeStyle?.id).slice(0, 4).flatMap((s) => s.images.slice(0, 1)).map((im, i) => (
+                    <img key={i} src={im.url} className="w-full h-16 object-cover rounded cursor-zoom-in" onClick={() => window.open(im.url, "_blank")} alt="" />
+                  ))}
+                </div>
               </div>
+              <div>
+                <div className="font-medium mb-1">本款式自定义标签</div>
+                <div className="flex flex-wrap gap-1">
+                  {Object.values(drafts).flatMap((d) => d?.customTags || []).map((t, i) => (
+                    <span key={i} className="text-xs px-2 py-0.5 rounded bg-accent/30">{t}</span>
+                  ))}
+                </div>
+              </div>
+              {library.craftPart && (
+                <div>
+                  <div className="font-medium mb-1">工艺-部位参考</div>
+                  <div className="text-xs space-y-0.5 text-muted-foreground">
+                    {Object.entries(library.craftPart.rules).map(([c, ps]) => (
+                      <div key={c}><b className="text-foreground">{c}</b>: {ps.join(", ")}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
