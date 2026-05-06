@@ -267,59 +267,71 @@ export default function AnnotatorWorkbench() {
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Left: style list 320px */}
-        <div className="w-[320px] border-r bg-card flex flex-col">
-          <div className="p-2 border-b space-y-2">
-            <Input placeholder="搜索款式ID…" value={search} onChange={(e) => setSearch(e.target.value)} className="h-8" />
-            <div className="flex flex-wrap gap-1">
-              {STATUSES.map((s) => (
-                <button key={s.key} onClick={() => setFilterStatus(s.key)}
-                  className={`text-xs px-2 py-0.5 rounded ${filterStatus === s.key ? "bg-primary text-primary-foreground" : "bg-muted hover:bg-muted/70"}`}>
-                  {s.label}
-                </button>
-              ))}
+        {/* Left: style list (collapsible) */}
+        <div className={`${leftCollapsed ? "w-10" : "w-[280px]"} border-r bg-card flex flex-col transition-all relative shrink-0`}>
+          <button onClick={() => setLeftCollapsed(!leftCollapsed)}
+            className="absolute -right-3 top-3 z-10 bg-card border rounded-full w-6 h-6 flex items-center justify-center hover:bg-muted shadow-sm">
+            {leftCollapsed ? <PanelLeftOpen className="w-3 h-3" /> : <PanelLeftClose className="w-3 h-3" />}
+          </button>
+          {leftCollapsed ? (
+            <div className="flex-1 flex flex-col items-center pt-4 gap-2 text-[10px] text-muted-foreground">
+              <span className="rotate-90 whitespace-nowrap mt-8">款式列表 ({styles.length})</span>
             </div>
-            {selectedStyles.size > 0 && (
-              <div className="flex gap-1 items-center">
-                <span className="text-xs">已选 {selectedStyles.size}</span>
-                <Button size="sm" className="h-6 text-xs" onClick={batchSubmit}>批量提交</Button>
-                <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => setSelectedStyles(new Set())}>清空</Button>
-              </div>
-            )}
-          </div>
-          <div className="flex-1 overflow-auto">
-            {styles.map((s) => {
-              const st = styleStatus(s.id);
-              const tagSummary: string[] = [];
-              editablePerspectives.forEach((p) => {
-                const a = db.annotations.find((x) => x.taskId === task.id && x.styleId === s.id && x.perspective === p);
-                if (a) Object.values(a.data).forEach((v) => (Array.isArray(v) ? v : [v]).forEach((vv) => vv && tagSummary.push(vv as string)));
-              });
-              return (
-                <div key={s.id}
-                  onClick={() => setActiveStyleId(s.id)}
-                  className={`p-2 border-b cursor-pointer flex gap-2 ${activeStyleId === s.id ? "bg-primary/10 border-l-4 border-l-primary" : "hover:bg-muted/50"}`}>
-                  <input type="checkbox" className="mt-1" checked={selectedStyles.has(s.id)} onClick={(e) => e.stopPropagation()}
-                    onChange={(e) => {
-                      const set = new Set(selectedStyles);
-                      if (e.target.checked) set.add(s.id); else set.delete(s.id);
-                      setSelectedStyles(set);
-                    }} />
-                  {s.images[0] ? <img src={s.images[0].url} className="w-12 h-12 object-cover rounded" alt="" /> : <div className="w-12 h-12 bg-muted rounded" />}
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-medium truncate">{s.styleId}</div>
-                    <div className="text-[10px] text-muted-foreground">{s.images.length} 图 · <StatusBadge s={st} /></div>
-                    <div className="text-[10px] truncate text-muted-foreground">{[...new Set(tagSummary)].slice(0, 3).join(" · ") || "无标签"}</div>
-                  </div>
+          ) : (
+            <>
+              <div className="p-2 border-b space-y-2">
+                <Input placeholder="搜索款式ID…" value={search} onChange={(e) => setSearch(e.target.value)} className="h-8" />
+                <div className="flex flex-wrap gap-1">
+                  {STATUSES.map((s) => (
+                    <button key={s.key} onClick={() => setFilterStatus(s.key)}
+                      className={`text-xs px-2 py-0.5 rounded ${filterStatus === s.key ? "bg-primary text-primary-foreground" : "bg-muted hover:bg-muted/70"}`}>
+                      {s.label}
+                    </button>
+                  ))}
                 </div>
-              );
-            })}
-            {styles.length === 0 && <div className="text-sm text-muted-foreground p-4">无符合的款式</div>}
-          </div>
+                {selectedStyles.size > 0 && (
+                  <div className="flex gap-1 items-center">
+                    <span className="text-xs">已选 {selectedStyles.size}</span>
+                    <Button size="sm" className="h-6 text-xs" onClick={batchSubmit}>批量提交</Button>
+                    <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => setSelectedStyles(new Set())}>清空</Button>
+                  </div>
+                )}
+              </div>
+              <div className="flex-1 overflow-auto">
+                {styles.map((s) => {
+                  const st = styleStatus(s.id);
+                  const tagSummary: string[] = [];
+                  editablePerspectives.forEach((p) => {
+                    const a = db.annotations.find((x) => x.taskId === task.id && x.styleId === s.id && x.perspective === p);
+                    if (a) Object.values(a.data).forEach((v) => (Array.isArray(v) ? v : [v]).forEach((vv) => vv && tagSummary.push(vv as string)));
+                  });
+                  return (
+                    <div key={s.id}
+                      onClick={() => setActiveStyleId(s.id)}
+                      className={`p-2 border-b cursor-pointer flex gap-2 ${activeStyleId === s.id ? "bg-primary/10 border-l-4 border-l-primary" : "hover:bg-muted/50"}`}>
+                      <input type="checkbox" className="mt-1" checked={selectedStyles.has(s.id)} onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => {
+                          const set = new Set(selectedStyles);
+                          if (e.target.checked) set.add(s.id); else set.delete(s.id);
+                          setSelectedStyles(set);
+                        }} />
+                      {s.images[0] ? <img src={s.images[0].url} className="w-12 h-12 object-cover rounded" alt="" /> : <div className="w-12 h-12 bg-muted rounded" />}
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-medium truncate">{s.styleId}</div>
+                        <div className="text-[10px] text-muted-foreground">{s.images.length} 图 · <StatusBadge s={st} /></div>
+                        <div className="text-[10px] truncate text-muted-foreground">{[...new Set(tagSummary)].slice(0, 3).join(" · ") || "无标签"}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+                {styles.length === 0 && <div className="text-sm text-muted-foreground p-4">无符合的款式</div>}
+              </div>
+            </>
+          )}
         </div>
 
-        {/* Right: workspace */}
-        <div className="flex-1 overflow-auto">
+        {/* Middle: image + perspectives split */}
+        <div className="flex-1 overflow-hidden flex">
           {!activeStyle ? (
             <div className="p-6 text-muted-foreground">请从左侧选择一个款式</div>
           ) : (
