@@ -35,27 +35,40 @@ export default function Reviewer() {
           <h1 className="text-2xl font-bold">待审核任务</h1>
           <Input placeholder="搜索任务…" value={search} onChange={(e) => setSearch(e.target.value)} className="w-64" />
         </div>
-        <div className="grid grid-cols-2 gap-4">
-          {myTasks.filter((t) => t.name.toLowerCase().includes(search.toLowerCase())).map((t) => {
-            const ds = db.datasets.find((d) => d.id === t.datasetId);
-            const pending = db.annotations.filter((a) => a.taskId === t.id && a.status === "submitted").length;
-            const approved = db.annotations.filter((a) => a.taskId === t.id && a.status === "approved").length;
-            const rejected = db.annotations.filter((a) => a.taskId === t.id && a.status === "rejected").length;
-            return (
-              <Card key={t.id} className="p-4 space-y-2">
-                <h3 className="font-semibold">{t.name}</h3>
-                <div className="text-xs text-muted-foreground">任务包：{ds?.name} · {ds?.styles.length || 0} 个款式</div>
-                <div className="flex gap-3 text-xs">
-                  <span className="text-blue-700">待审核 {pending}</span>
-                  <span className="text-green-700">通过 {approved}</span>
-                  <span className="text-red-700">打回 {rejected}</span>
-                </div>
-                <Button size="sm" onClick={() => setTaskId(t.id)}>进入审核</Button>
-              </Card>
-            );
-          })}
-          {myTasks.length === 0 && <p className="text-muted-foreground">暂无任务</p>}
-        </div>
+        {(() => {
+          const filtered = myTasks.filter((t) => t.name.toLowerCase().includes(search.toLowerCase()));
+          const groups = filtered.reduce<Record<string, typeof filtered>>((acc, t) => {
+            const lib = db.libraries.find((l) => l.key === t.libraryKey)?.name || t.libraryKey;
+            (acc[lib] = acc[lib] || []).push(t);
+            return acc;
+          }, {});
+          if (Object.keys(groups).length === 0) return <p className="text-muted-foreground">暂无任务</p>;
+          return Object.entries(groups).map(([libName, ts]) => (
+            <div key={libName} className="mb-6">
+              <h2 className="text-sm font-semibold mb-2 text-muted-foreground">{libName}（{ts.length}）</h2>
+              <div className="grid grid-cols-2 gap-4">
+                {ts.map((t) => {
+                  const ds = db.datasets.find((d) => d.id === t.datasetId);
+                  const pending = db.annotations.filter((a) => a.taskId === t.id && a.status === "submitted").length;
+                  const approved = db.annotations.filter((a) => a.taskId === t.id && a.status === "approved").length;
+                  const rejected = db.annotations.filter((a) => a.taskId === t.id && a.status === "rejected").length;
+                  return (
+                    <Card key={t.id} className="p-4 space-y-2">
+                      <h3 className="font-semibold">{t.name}</h3>
+                      <div className="text-xs text-muted-foreground">任务包：{ds?.name} · {ds?.styles.length || 0} 个条目</div>
+                      <div className="flex gap-3 text-xs">
+                        <span className="text-blue-700">待审核 {pending}</span>
+                        <span className="text-green-700">通过 {approved}</span>
+                        <span className="text-red-700">打回 {rejected}</span>
+                      </div>
+                      <Button size="sm" onClick={() => setTaskId(t.id)}>进入审核</Button>
+                    </Card>
+                  );
+                })}
+              </div>
+            </div>
+          ));
+        })()}
       </div>
     );
   }
@@ -77,6 +90,7 @@ function ReviewerWorkbench({ taskId, onExit }: { taskId: string; onExit: () => v
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editMode, setEditMode] = useState(false);
   const [editDraft, setEditDraft] = useState<Record<Perspective, Record<string, string[]>>>({} as any);
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
 
   const styleStatusOf = (sId: string): AnnoStatus | "mixed" => {
     const annos = PERSPECTIVES.map((p) => db.annotations.find((a) => a.taskId === task.id && a.styleId === sId && a.perspective === p)).filter(Boolean) as Annotation[];
@@ -220,42 +234,54 @@ function ReviewerWorkbench({ taskId, onExit }: { taskId: string; onExit: () => v
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* left list */}
-        <div className="w-[320px] border-r bg-card flex flex-col">
-          <div className="p-2 border-b space-y-2">
-            <Input placeholder="搜索款式ID…" value={search} onChange={(e) => setSearch(e.target.value)} className="h-8" />
-            <div className="flex flex-wrap gap-1">
-              {FILTERS.map((f) => (
-                <button key={f.key} onClick={() => setFilter(f.key)}
-                  className={`text-xs px-2 py-0.5 rounded ${filter === f.key ? "bg-primary text-primary-foreground" : "bg-muted hover:bg-muted/70"}`}>
-                  {f.label}
-                </button>
-              ))}
+        {/* left list (collapsible) */}
+        <div className={`${leftCollapsed ? "w-10" : "w-[280px]"} border-r bg-card flex flex-col transition-all relative shrink-0`}>
+          <button onClick={() => setLeftCollapsed(!leftCollapsed)}
+            className="absolute -right-3 top-3 z-10 bg-card border rounded-full w-6 h-6 flex items-center justify-center hover:bg-muted shadow-sm">
+            {leftCollapsed ? "›" : "‹"}
+          </button>
+          {leftCollapsed ? (
+            <div className="flex-1 flex items-start justify-center pt-10">
+              <span className="rotate-90 text-[10px] text-muted-foreground whitespace-nowrap">条目列表 ({styles.length})</span>
             </div>
-          </div>
-          <div className="flex-1 overflow-auto">
-            {styles.map((s) => {
-              const st = styleStatusOf(s.id);
-              return (
-                <div key={s.id} onClick={() => setActiveStyleId(s.id)}
-                  className={`p-2 border-b cursor-pointer flex gap-2 ${activeStyleId === s.id ? "bg-primary/10 border-l-4 border-l-primary" : "hover:bg-muted/50"}`}>
-                  <input type="checkbox" className="mt-1" checked={selected.has(s.id)} onClick={(e) => e.stopPropagation()}
-                    onChange={(e) => {
-                      const ns = new Set(selected);
-                      if (e.target.checked) ns.add(s.id); else ns.delete(s.id);
-                      setSelected(ns);
-                    }} />
-                  {s.images[0] ? <img src={s.images[0].url} className="w-12 h-12 object-cover rounded" alt="" /> : <div className="w-12 h-12 bg-muted rounded" />}
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-medium truncate">{s.styleId}</div>
-                    <div className="text-[10px] text-muted-foreground">{s.images.length} 图</div>
-                    <div className="text-[10px]"><StatusBadge s={st as AnnoStatus} /></div>
-                  </div>
+          ) : (
+            <>
+              <div className="p-2 border-b space-y-2">
+                <Input placeholder="搜索ID…" value={search} onChange={(e) => setSearch(e.target.value)} className="h-8" />
+                <div className="flex flex-wrap gap-1">
+                  {FILTERS.map((f) => (
+                    <button key={f.key} onClick={() => setFilter(f.key)}
+                      className={`text-xs px-2 py-0.5 rounded ${filter === f.key ? "bg-primary text-primary-foreground" : "bg-muted hover:bg-muted/70"}`}>
+                      {f.label}
+                    </button>
+                  ))}
                 </div>
-              );
-            })}
-            {styles.length === 0 && <div className="text-sm text-muted-foreground p-4">无符合的款式</div>}
-          </div>
+              </div>
+              <div className="flex-1 overflow-auto">
+                {styles.map((s) => {
+                  const st = styleStatusOf(s.id);
+                  return (
+                    <div key={s.id} onClick={() => setActiveStyleId(s.id)}
+                      className={`p-2 border-b cursor-pointer flex gap-2 ${activeStyleId === s.id ? "bg-primary/10 border-l-4 border-l-primary" : "hover:bg-muted/50"}`}>
+                      <input type="checkbox" className="mt-1" checked={selected.has(s.id)} onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => {
+                          const ns = new Set(selected);
+                          if (e.target.checked) ns.add(s.id); else ns.delete(s.id);
+                          setSelected(ns);
+                        }} />
+                      {s.images[0] ? <img src={s.images[0].url} className="w-12 h-12 object-cover rounded" alt="" /> : <div className="w-12 h-12 bg-muted rounded" />}
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-medium truncate">{s.styleId}</div>
+                        <div className="text-[10px] text-muted-foreground">{s.images.length} 图</div>
+                        <div className="text-[10px]"><StatusBadge s={st as AnnoStatus} /></div>
+                      </div>
+                    </div>
+                  );
+                })}
+                {styles.length === 0 && <div className="text-sm text-muted-foreground p-4">无符合的条目</div>}
+              </div>
+            </>
+          )}
         </div>
 
         {/* main */}

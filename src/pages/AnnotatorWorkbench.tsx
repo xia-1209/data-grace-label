@@ -21,7 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
-import { Lock, Pencil, X, Plus, HelpCircle, BookOpen, Sparkles, History, RotateCcw } from "lucide-react";
+import { Lock, Pencil, X, Plus, HelpCircle, BookOpen, Sparkles, History, RotateCcw, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { toast } from "sonner";
 
 interface DraftMap {
@@ -62,6 +62,8 @@ export default function AnnotatorWorkbench() {
   const [drafts, setDrafts] = useState<DraftMap>({});
   const [showRules, setShowRules] = useState(false);
   const [historyOpen, setHistoryOpen] = useState<Perspective | null>(null);
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [rightCollapsed, setRightCollapsed] = useState(typeof window !== "undefined" && window.innerWidth < 1280);
 
   const styleStatus = (sId: string): AnnoStatus => {
     if (!task) return "not_started";
@@ -265,146 +267,177 @@ export default function AnnotatorWorkbench() {
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Left: style list 320px */}
-        <div className="w-[320px] border-r bg-card flex flex-col">
-          <div className="p-2 border-b space-y-2">
-            <Input placeholder="搜索款式ID…" value={search} onChange={(e) => setSearch(e.target.value)} className="h-8" />
-            <div className="flex flex-wrap gap-1">
-              {STATUSES.map((s) => (
-                <button key={s.key} onClick={() => setFilterStatus(s.key)}
-                  className={`text-xs px-2 py-0.5 rounded ${filterStatus === s.key ? "bg-primary text-primary-foreground" : "bg-muted hover:bg-muted/70"}`}>
-                  {s.label}
-                </button>
-              ))}
+        {/* Left: style list (collapsible) */}
+        <div className={`${leftCollapsed ? "w-10" : "w-[280px]"} border-r bg-card flex flex-col transition-all relative shrink-0`}>
+          <button onClick={() => setLeftCollapsed(!leftCollapsed)}
+            className="absolute -right-3 top-3 z-10 bg-card border rounded-full w-6 h-6 flex items-center justify-center hover:bg-muted shadow-sm">
+            {leftCollapsed ? <PanelLeftOpen className="w-3 h-3" /> : <PanelLeftClose className="w-3 h-3" />}
+          </button>
+          {leftCollapsed ? (
+            <div className="flex-1 flex flex-col items-center pt-4 gap-2 text-[10px] text-muted-foreground">
+              <span className="rotate-90 whitespace-nowrap mt-8">款式列表 ({styles.length})</span>
             </div>
-            {selectedStyles.size > 0 && (
-              <div className="flex gap-1 items-center">
-                <span className="text-xs">已选 {selectedStyles.size}</span>
-                <Button size="sm" className="h-6 text-xs" onClick={batchSubmit}>批量提交</Button>
-                <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => setSelectedStyles(new Set())}>清空</Button>
-              </div>
-            )}
-          </div>
-          <div className="flex-1 overflow-auto">
-            {styles.map((s) => {
-              const st = styleStatus(s.id);
-              const tagSummary: string[] = [];
-              editablePerspectives.forEach((p) => {
-                const a = db.annotations.find((x) => x.taskId === task.id && x.styleId === s.id && x.perspective === p);
-                if (a) Object.values(a.data).forEach((v) => (Array.isArray(v) ? v : [v]).forEach((vv) => vv && tagSummary.push(vv as string)));
-              });
-              return (
-                <div key={s.id}
-                  onClick={() => setActiveStyleId(s.id)}
-                  className={`p-2 border-b cursor-pointer flex gap-2 ${activeStyleId === s.id ? "bg-primary/10 border-l-4 border-l-primary" : "hover:bg-muted/50"}`}>
-                  <input type="checkbox" className="mt-1" checked={selectedStyles.has(s.id)} onClick={(e) => e.stopPropagation()}
-                    onChange={(e) => {
-                      const set = new Set(selectedStyles);
-                      if (e.target.checked) set.add(s.id); else set.delete(s.id);
-                      setSelectedStyles(set);
-                    }} />
-                  {s.images[0] ? <img src={s.images[0].url} className="w-12 h-12 object-cover rounded" alt="" /> : <div className="w-12 h-12 bg-muted rounded" />}
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-medium truncate">{s.styleId}</div>
-                    <div className="text-[10px] text-muted-foreground">{s.images.length} 图 · <StatusBadge s={st} /></div>
-                    <div className="text-[10px] truncate text-muted-foreground">{[...new Set(tagSummary)].slice(0, 3).join(" · ") || "无标签"}</div>
-                  </div>
-                </div>
-              );
-            })}
-            {styles.length === 0 && <div className="text-sm text-muted-foreground p-4">无符合的款式</div>}
-          </div>
-        </div>
-
-        {/* Right: workspace */}
-        <div className="flex-1 overflow-auto">
-          {!activeStyle ? (
-            <div className="p-6 text-muted-foreground">请从左侧选择一个款式</div>
           ) : (
-            <div className="p-4 space-y-4">
-              {/* style header + image switcher */}
-              <Card className="p-3">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="font-bold text-lg">{activeStyle.styleId}</div>
-                  <span className="text-xs text-muted-foreground">{activeStyle.images.length} 张图片</span>
+            <>
+              <div className="p-2 border-b space-y-2">
+                <Input placeholder="搜索款式ID…" value={search} onChange={(e) => setSearch(e.target.value)} className="h-8" />
+                <div className="flex flex-wrap gap-1">
+                  {STATUSES.map((s) => (
+                    <button key={s.key} onClick={() => setFilterStatus(s.key)}
+                      className={`text-xs px-2 py-0.5 rounded ${filterStatus === s.key ? "bg-primary text-primary-foreground" : "bg-muted hover:bg-muted/70"}`}>
+                      {s.label}
+                    </button>
+                  ))}
                 </div>
-                {isComment ? (
-                  <textarea placeholder="客户评语文本…" className="border rounded p-2 text-sm w-full h-24 bg-background" />
-                ) : activeStyle.images.length > 0 ? (
-                  <div className="flex gap-3">
-                    <img src={activeStyle.images[imgIdx]?.url} alt="" className="w-72 h-72 object-contain bg-muted rounded" />
-                    <div className="flex flex-col gap-1 overflow-auto max-h-72">
-                      {activeStyle.images.map((im, i) => (
-                        <button key={i} onClick={() => setImgIdx(i)}
-                          className={`border rounded p-1 ${imgIdx === i ? "border-primary ring-2 ring-primary/30" : ""}`}>
-                          <img src={im.url} className="w-16 h-16 object-cover rounded" alt="" />
-                          <div className="text-[10px] mt-0.5 text-center">{im.angle || `图${i + 1}`}</div>
-                        </button>
-                      ))}
-                    </div>
+                {selectedStyles.size > 0 && (
+                  <div className="flex gap-1 items-center">
+                    <span className="text-xs">已选 {selectedStyles.size}</span>
+                    <Button size="sm" className="h-6 text-xs" onClick={batchSubmit}>批量提交</Button>
+                    <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => setSelectedStyles(new Set())}>清空</Button>
                   </div>
-                ) : (
-                  <div className="text-muted-foreground text-sm">该款式暂无图片</div>
                 )}
-              </Card>
-
-              {/* perspectives */}
-              {PERSPECTIVES.map((p) => {
-                const existing = getAnnotation(task.id, activeStyle.id, p);
-                const lockedByApproval = existing?.status === "approved";
-                const editable = editablePerspectives.includes(p) && !lockedByApproval;
-                const draft = drafts[p] || emptyDraft();
-                return (
-                  <Card key={p} className={`p-4 ${editable ? "border-primary/30" : "bg-muted/40"}`}>
-                    <div className="flex items-center gap-2 mb-3">
-                      {editable ? <Pencil className="w-4 h-4 text-primary" /> : <Lock className="w-4 h-4 text-muted-foreground" />}
-                      <h3 className="font-semibold">{PERSPECTIVE_LABEL[p]}</h3>
-                      {existing && <StatusBadge s={existing.status} />}
-                      {lockedByApproval && <span className="text-[10px] text-green-700">已通过 · 只读</span>}
-                      <Button size="sm" variant="ghost" className="ml-auto h-7 text-xs" onClick={() => setHistoryOpen(p)}>
-                        <History className="w-3 h-3" /> 历史版本 ({existing?.history.length || 0})
-                      </Button>
+              </div>
+              <div className="flex-1 overflow-auto">
+                {styles.map((s) => {
+                  const st = styleStatus(s.id);
+                  const tagSummary: string[] = [];
+                  editablePerspectives.forEach((p) => {
+                    const a = db.annotations.find((x) => x.taskId === task.id && x.styleId === s.id && x.perspective === p);
+                    if (a) Object.values(a.data).forEach((v) => (Array.isArray(v) ? v : [v]).forEach((vv) => vv && tagSummary.push(vv as string)));
+                  });
+                  return (
+                    <div key={s.id}
+                      onClick={() => setActiveStyleId(s.id)}
+                      className={`p-2 border-b cursor-pointer flex gap-2 ${activeStyleId === s.id ? "bg-primary/10 border-l-4 border-l-primary" : "hover:bg-muted/50"}`}>
+                      <input type="checkbox" className="mt-1" checked={selectedStyles.has(s.id)} onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => {
+                          const set = new Set(selectedStyles);
+                          if (e.target.checked) set.add(s.id); else set.delete(s.id);
+                          setSelectedStyles(set);
+                        }} />
+                      {s.images[0] ? <img src={s.images[0].url} className="w-12 h-12 object-cover rounded" alt="" /> : <div className="w-12 h-12 bg-muted rounded" />}
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-medium truncate">{s.styleId}</div>
+                        <div className="text-[10px] text-muted-foreground">{s.images.length} 图 · <StatusBadge s={st} /></div>
+                        <div className="text-[10px] truncate text-muted-foreground">{[...new Set(tagSummary)].slice(0, 3).join(" · ") || "无标签"}</div>
+                      </div>
                     </div>
-                    {existing?.rejectReason && (
-                      <div className="text-xs text-destructive bg-destructive/10 p-2 rounded mb-2">打回原因：{existing.rejectReason}</div>
-                    )}
-                    <PerspectiveForm library={library} draft={draft} editable={editable} onChange={(fn) => updateDraft(p, fn)} />
-                  </Card>
-                );
-              })}
-            </div>
+                  );
+                })}
+                {styles.length === 0 && <div className="text-sm text-muted-foreground p-4">无符合的款式</div>}
+              </div>
+            </>
           )}
         </div>
 
-        {/* Right helper panel */}
-        <div className="w-64 border-l bg-card overflow-auto p-3 space-y-3 text-sm">
-          <Button size="sm" variant="outline" className="w-full" onClick={() => setShowRules(true)}>
-            <BookOpen className="w-3 h-3" /> 标注规范
-          </Button>
-          <div>
-            <div className="font-medium mb-1">参考图库</div>
-            <div className="grid grid-cols-2 gap-1">
-              {dataset.styles.filter((s) => s.id !== activeStyle?.id).slice(0, 4).flatMap((s) => s.images.slice(0, 1)).map((im, i) => (
-                <img key={i} src={im.url} className="w-full h-16 object-cover rounded cursor-zoom-in" onClick={() => window.open(im.url, "_blank")} alt="" />
-              ))}
-            </div>
-          </div>
-          <div>
-            <div className="font-medium mb-1">本款式自定义标签</div>
-            <div className="flex flex-wrap gap-1">
-              {Object.values(drafts).flatMap((d) => d?.customTags || []).map((t, i) => (
-                <span key={i} className="text-xs px-2 py-0.5 rounded bg-accent/30">{t}</span>
-              ))}
-            </div>
-          </div>
-          {library.craftPart && (
-            <div>
-              <div className="font-medium mb-1">工艺-部位参考</div>
-              <div className="text-xs space-y-0.5 text-muted-foreground">
-                {Object.entries(library.craftPart.rules).map(([c, ps]) => (
-                  <div key={c}><b className="text-foreground">{c}</b>: {ps.join(", ")}</div>
-                ))}
+        {/* Middle: image + perspectives split */}
+        <div className="flex-1 overflow-hidden flex">
+          {!activeStyle ? (
+            <div className="p-6 text-muted-foreground">请从左侧选择一个款式</div>
+          ) : (
+            <>
+              {/* Image column */}
+              <div className="w-[35%] min-w-[280px] border-r overflow-auto p-4 bg-background">
+                <Card className="p-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="font-bold">{activeStyle.styleId}</div>
+                    <span className="text-xs text-muted-foreground">{activeStyle.images.length} 图</span>
+                  </div>
+                  {isComment ? (
+                    <textarea placeholder="客户评语文本…" className="border rounded p-2 text-sm w-full h-32 bg-background" />
+                  ) : activeStyle.images.length > 0 ? (
+                    <>
+                      <img src={activeStyle.images[imgIdx]?.url} alt=""
+                        className="w-full aspect-square object-contain bg-muted rounded mb-2 cursor-zoom-in"
+                        onClick={() => window.open(activeStyle.images[imgIdx]?.url, "_blank")} />
+                      <div className="flex gap-1 flex-wrap">
+                        {activeStyle.images.map((im, i) => (
+                          <button key={i} onClick={() => setImgIdx(i)}
+                            className={`border rounded p-0.5 ${imgIdx === i ? "border-primary ring-2 ring-primary/30" : ""}`}>
+                            <img src={im.url} className="w-14 h-14 object-cover rounded" alt="" />
+                            <div className="text-[10px] mt-0.5 text-center">{im.angle || `图${i + 1}`}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="text-muted-foreground text-sm">暂无图片</div>
+                  )}
+                </Card>
               </div>
+
+              {/* Form column */}
+              <div className="flex-1 overflow-auto p-4 space-y-3">
+                {PERSPECTIVES.map((p) => {
+                  const existing = getAnnotation(task.id, activeStyle.id, p);
+                  const lockedByApproval = existing?.status === "approved";
+                  const editable = editablePerspectives.includes(p) && !lockedByApproval;
+                  const draft = drafts[p] || emptyDraft();
+                  return (
+                    <Card key={p} className={`p-4 ${editable ? "border-primary/30" : "bg-muted/40"}`}>
+                      <div className="flex items-center gap-2 mb-3">
+                        {editable ? <Pencil className="w-4 h-4 text-primary" /> : <Lock className="w-4 h-4 text-muted-foreground" />}
+                        <h3 className="font-semibold">{PERSPECTIVE_LABEL[p]}</h3>
+                        {existing && <StatusBadge s={existing.status} />}
+                        {lockedByApproval && <span className="text-[10px] text-success">已通过 · 只读</span>}
+                        <Button size="sm" variant="ghost" className="ml-auto h-7 text-xs" onClick={() => setHistoryOpen(p)}>
+                          <History className="w-3 h-3" /> 历史 ({existing?.history.length || 0})
+                        </Button>
+                      </div>
+                      {existing?.rejectReason && (
+                        <div className="text-xs text-destructive bg-destructive/10 p-2 rounded mb-2">打回原因：{existing.rejectReason}</div>
+                      )}
+                      <PerspectiveForm library={library} draft={draft} editable={editable} onChange={(fn) => updateDraft(p, fn)} />
+                    </Card>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Right helper panel (collapsible) */}
+        <div className={`${rightCollapsed ? "w-10" : "w-64"} border-l bg-card overflow-auto transition-all relative shrink-0`}>
+          <button onClick={() => setRightCollapsed(!rightCollapsed)}
+            className="absolute -left-3 top-3 z-10 bg-card border rounded-full w-6 h-6 flex items-center justify-center hover:bg-muted shadow-sm">
+            {rightCollapsed ? <PanelRightOpen className="w-3 h-3" /> : <PanelRightClose className="w-3 h-3" />}
+          </button>
+          {rightCollapsed ? (
+            <div className="flex flex-col items-center pt-4 gap-3">
+              <BookOpen className="w-4 h-4 text-muted-foreground" />
+              <span className="rotate-90 text-[10px] text-muted-foreground whitespace-nowrap mt-6">辅助面板</span>
+            </div>
+          ) : (
+            <div className="p-3 space-y-3 text-sm">
+              <Button size="sm" variant="outline" className="w-full" onClick={() => setShowRules(true)}>
+                <BookOpen className="w-3 h-3" /> 标注规范
+              </Button>
+              <div>
+                <div className="font-medium mb-1">参考图库</div>
+                <div className="grid grid-cols-2 gap-1">
+                  {dataset.styles.filter((s) => s.id !== activeStyle?.id).slice(0, 4).flatMap((s) => s.images.slice(0, 1)).map((im, i) => (
+                    <img key={i} src={im.url} className="w-full h-16 object-cover rounded cursor-zoom-in" onClick={() => window.open(im.url, "_blank")} alt="" />
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div className="font-medium mb-1">本款式自定义标签</div>
+                <div className="flex flex-wrap gap-1">
+                  {Object.values(drafts).flatMap((d) => d?.customTags || []).map((t, i) => (
+                    <span key={i} className="text-xs px-2 py-0.5 rounded bg-accent/30">{t}</span>
+                  ))}
+                </div>
+              </div>
+              {library.craftPart && (
+                <div>
+                  <div className="font-medium mb-1">工艺-部位参考</div>
+                  <div className="text-xs space-y-0.5 text-muted-foreground">
+                    {Object.entries(library.craftPart.rules).map(([c, ps]) => (
+                      <div key={c}><b className="text-foreground">{c}</b>: {ps.join(", ")}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
