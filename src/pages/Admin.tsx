@@ -41,8 +41,9 @@ export function AdminDashboard() {
     const text = await file.text();
     try {
       const data = JSON.parse(text);
-      localStorage.setItem("garment_anno_db_v1", JSON.stringify(data));
+      localStorage.setItem("garment_anno_db_v2", JSON.stringify(data));
       window.dispatchEvent(new CustomEvent("db-updated"));
+      log("backup_restore", "admin");
       toast.success("已恢复");
     } catch { toast.error("JSON 解析失败"); }
   };
