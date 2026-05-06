@@ -123,9 +123,9 @@ export function AdminDatasets() {
   const exportZip = async (id: string) => {
     const ds = db.datasets.find((d) => d.id === id)!;
     const zip = new JSZip();
-    const csv = ["filename,id"];
-    ds.images.forEach((img) => csv.push(`${img.filename},${img.id}`));
-    zip.file("labels.csv", csv.join("\n"));
+    const csv = ["style_id,image_url,angle"];
+    ds.styles.forEach((s) => s.images.forEach((im) => csv.push(`${s.styleId},${im.url},${im.angle || ""}`)));
+    zip.file("styles.csv", csv.join("\n"));
     zip.file("dataset.json", JSON.stringify(ds, null, 2));
     const blob = await zip.generateAsync({ type: "blob" });
     saveAs(blob, `${ds.name}.zip`);
@@ -134,9 +134,9 @@ export function AdminDatasets() {
   const exportAnnotations = (id: string) => {
     const ds = db.datasets.find((d) => d.id === id)!;
     const tasks = db.tasks.filter((t) => t.datasetId === id);
-    const merged = ds.images.map((img) => ({
-      image: img,
-      annotations: db.annotations.filter((a) => tasks.find((t) => t.id === a.taskId) && a.imageId === img.id),
+    const merged = ds.styles.map((s) => ({
+      style: s,
+      annotations: db.annotations.filter((a) => tasks.find((t) => t.id === a.taskId) && a.styleId === s.id),
     }));
     const blob = new Blob([JSON.stringify(merged, null, 2)], { type: "application/json" });
     saveAs(blob, `${ds.name}_annotations.json`);
@@ -159,7 +159,7 @@ export function AdminDatasets() {
           <Card key={d.id} className="p-4 flex justify-between items-center">
             <div>
               <div className="font-medium">{d.name}</div>
-              <div className="text-xs text-muted-foreground">{d.images.length} 张图片 · 创建 {new Date(d.createdAt).toLocaleDateString()}</div>
+              <div className="text-xs text-muted-foreground">{d.styles.length} 个款式 · {d.styles.reduce((n, s) => n + s.images.length, 0)} 张图 · 创建 {new Date(d.createdAt).toLocaleDateString()}</div>
             </div>
             <div className="flex gap-2">
               <Button size="sm" variant="outline" onClick={() => setViewing(d.id)}>详情</Button>
