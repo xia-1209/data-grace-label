@@ -685,6 +685,8 @@ export function AdminUsers() {
 export function AdminRules() {
   const db = useDB();
   const [editing, setEditing] = useState<any>(null);
+  const [filterLib, setFilterLib] = useState("");
+  const [filterField, setFilterField] = useState("");
 
   const save = () => {
     const x = loadDB();
@@ -694,7 +696,10 @@ export function AdminRules() {
       x.ruleVersions.push({ id: uid(), ruleId: editing.id, snapshot: x.rules[i], ts: Date.now() });
       x.rules[i] = { ...editing, updatedAt: Date.now() };
     }
-    saveDB(x); setEditing(null); toast.success("已保存");
+    saveDB(x);
+    if (editing.status === "published") log("rule_publish", "admin", `${editing.libraryKey}/${editing.fieldKey}/${editing.optionValue}`);
+    else log("rule_save", "admin", `${editing.libraryKey}/${editing.fieldKey}/${editing.optionValue}`);
+    setEditing(null); toast.success("已保存");
   };
 
   const del = (id: string) => {
@@ -704,18 +709,70 @@ export function AdminRules() {
     saveDB(x);
   };
 
+  const exportRules = () => {
+    const blob = new Blob([JSON.stringify(db.rules, null, 2)], { type: "application/json" });
+    saveAs(blob, "rules.json");
+    log("rule_export", "admin");
+  };
+  const importRules = async (file: File) => {
+    try {
+      const txt = await file.text();
+      const arr = JSON.parse(txt);
+      if (!Array.isArray(arr)) throw new Error("应为数组");
+      const x = loadDB();
+      arr.forEach((r) => {
+        const i = x.rules.findIndex((rr) => rr.id === r.id);
+        if (i >= 0) x.rules[i] = r; else x.rules.push(r);
+      });
+      saveDB(x);
+      log("rule_import", "admin", `${arr.length} 条`);
+      toast.success(`已导入 ${arr.length} 条`);
+    } catch (e: any) { toast.error(`导入失败：${e.message}`); }
+  };
+
+  const handleImageUpload = async (files: FileList | null) => {
+    if (!files) return;
+    const list = Array.from(files).slice(0, 3 - (editing.positiveImages?.length || 0));
+    const reads = await Promise.all(list.map((f) => new Promise<string>((res) => {
+      const r = new FileReader();
+      r.onload = () => res(String(r.result));
+      r.readAsDataURL(f);
+    })));
+    setEditing({ ...editing, positiveImages: [...(editing.positiveImages || []), ...reads].slice(0, 3) });
+  };
+
+  const filtered = db.rules.filter((r) =>
+    (!filterLib || r.libraryKey === filterLib) && (!filterField || r.fieldKey.includes(filterField))
+  );
+
+  const curLib = db.libraries.find((l) => l.key === (editing?.libraryKey));
+  const curField = curLib?.fields.find((f) => f.key === editing?.fieldKey);
+
   return (
     <div className="p-6 max-w-5xl mx-auto">
-      <div className="flex justify-between mb-3">
+      <div className="flex justify-between mb-3 items-center gap-2">
         <h1 className="text-2xl font-bold">打标规则管理</h1>
-        <Button onClick={() => setEditing({ __new: true, libraryKey: db.libraries[0]?.key, fieldKey: "", optionValue: "", definition: "", criteria: "", positiveImages: [], exclusive: [], dependency: "", notRecommended: false, notes: "", status: "draft" })}>新建规则</Button>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={exportRules}>导出 JSON</Button>
+          <label className="text-sm border rounded px-3 py-1.5 cursor-pointer hover:bg-muted">导入 JSON
+            <input type="file" accept=".json" className="hidden" onChange={(e) => e.target.files?.[0] && importRules(e.target.files[0])} />
+          </label>
+          <Button onClick={() => setEditing({ __new: true, libraryKey: db.libraries[0]?.key, fieldKey: "", optionValue: "", definition: "", criteria: "", positiveImages: [], exclusive: [], dependency: "", notRecommended: false, notes: "", status: "draft" })}>新建规则</Button>
+        </div>
+      </div>
+      <div className="flex gap-2 mb-3">
+        <select className="border rounded px-2 py-1.5 text-sm" value={filterLib} onChange={(e) => setFilterLib(e.target.value)}>
+          <option value="">所有库</option>
+          {db.libraries.map((l) => <option key={l.key} value={l.key}>{l.name}</option>)}
+        </select>
+        <Input placeholder="按字段筛选" value={filterField} onChange={(e) => setFilterField(e.target.value)} className="w-48 h-8" />
       </div>
       <div className="space-y-2">
-        {db.rules.map((r) => (
+        {filtered.map((r) => (
           <Card key={r.id} className="p-3 flex justify-between items-center">
             <div>
               <div className="font-medium">{r.libraryKey} / {r.fieldKey} / {r.optionValue}</div>
-              <div className="text-xs text-muted-foreground">{r.definition} <span className="ml-2">[{r.status}]</span></div>
+              <div className="text-xs text-muted-foreground">{r.definition} <span className="ml-2">[{r.status}]</span> {r.positiveImages?.length > 0 && <span className="ml-2">📷 {r.positiveImages.length}</span>}</div>
             </div>
             <div className="flex gap-2">
               <Button size="sm" variant="outline" onClick={() => setEditing({ ...r })}>编辑</Button>
@@ -728,12 +785,53 @@ export function AdminRules() {
       {editing && (
         <Card className="p-4 mt-4 space-y-2">
           <h3 className="font-semibold">规则编辑</h3>
-          <Input placeholder="字段key" value={editing.fieldKey} onChange={(e) => setEditing({ ...editing, fieldKey: e.target.value })} />
-          <Input placeholder="标签值" value={editing.optionValue} onChange={(e) => setEditing({ ...editing, optionValue: e.target.value })} />
+          <select className="border rounded px-2 py-2 w-full text-sm" value={editing.libraryKey} onChange={(e) => setEditing({ ...editing, libraryKey: e.target.value, fieldKey: "" })}>
+            {db.libraries.map((l) => <option key={l.key} value={l.key}>{l.name}</option>)}
+          </select>
+          <select className="border rounded px-2 py-2 w-full text-sm" value={editing.fieldKey} onChange={(e) => setEditing({ ...editing, fieldKey: e.target.value, optionValue: "" })}>
+            <option value="">选择字段</option>
+            {curLib?.fields.filter((f) => f.type !== "text").map((f) => <option key={f.key} value={f.key}>{f.label} ({f.key})</option>)}
+          </select>
+          <select className="border rounded px-2 py-2 w-full text-sm" value={editing.optionValue} onChange={(e) => setEditing({ ...editing, optionValue: e.target.value })}>
+            <option value="">选择标签值</option>
+            {curField?.options.map((o) => <option key={o} value={o}>{o}</option>)}
+          </select>
           <Input placeholder="定义" value={editing.definition} onChange={(e) => setEditing({ ...editing, definition: e.target.value })} />
           <Input placeholder="判断标准" value={editing.criteria} onChange={(e) => setEditing({ ...editing, criteria: e.target.value })} />
-          <Input placeholder="互斥标签 (逗号分隔)" value={editing.exclusive.join(",")} onChange={(e) => setEditing({ ...editing, exclusive: e.target.value.split(",").map((s: string) => s.trim()).filter(Boolean) })} />
-          <Input placeholder="依赖条件" value={editing.dependency} onChange={(e) => setEditing({ ...editing, dependency: e.target.value })} />
+          <div>
+            <div className="text-xs mb-1">互斥标签（同字段）：</div>
+            <div className="flex flex-wrap gap-1">
+              {curField?.options.filter((o) => o !== editing.optionValue).map((o) => (
+                <label key={o} className="text-xs border rounded px-2 py-1 flex items-center gap-1">
+                  <input type="checkbox" checked={editing.exclusive.includes(o)} onChange={() => setEditing({
+                    ...editing,
+                    exclusive: editing.exclusive.includes(o) ? editing.exclusive.filter((x: string) => x !== o) : [...editing.exclusive, o],
+                  })} />{o}
+                </label>
+              ))}
+            </div>
+          </div>
+          <Input placeholder='依赖条件 e.g. category == "连衣裙"' value={editing.dependency} onChange={(e) => setEditing({ ...editing, dependency: e.target.value })} />
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={editing.notRecommended} onChange={(e) => setEditing({ ...editing, notRecommended: e.target.checked })} />
+            默认不推荐
+          </label>
+          <div>
+            <div className="text-xs mb-1">正例图（最多3张）：</div>
+            <div className="flex gap-2 flex-wrap mb-1">
+              {(editing.positiveImages || []).map((img: string, i: number) => (
+                <div key={i} className="relative">
+                  <img src={img} className="w-20 h-20 object-cover rounded" alt="" />
+                  <button className="absolute top-0 right-0 bg-destructive text-destructive-foreground text-xs w-5 h-5 rounded-full" onClick={() =>
+                    setEditing({ ...editing, positiveImages: editing.positiveImages.filter((_: any, j: number) => j !== i) })
+                  }>×</button>
+                </div>
+              ))}
+            </div>
+            {(editing.positiveImages?.length || 0) < 3 && (
+              <input type="file" accept="image/*" multiple onChange={(e) => handleImageUpload(e.target.files)} />
+            )}
+          </div>
           <select className="border rounded px-2 py-2" value={editing.status} onChange={(e) => setEditing({ ...editing, status: e.target.value })}>
             <option value="draft">草稿</option><option value="published">已发布</option>
           </select>
