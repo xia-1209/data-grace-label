@@ -112,28 +112,7 @@ export function AdminDatasets() {
   };
 
   if (viewing) {
-    const ds = db.datasets.find((d) => d.id === viewing)!;
-    return (
-      <div className="p-6 max-w-6xl mx-auto">
-        <Button size="sm" variant="ghost" onClick={() => setViewing(null)}>← 返回</Button>
-        <h1 className="text-2xl font-bold my-3">{ds.name}</h1>
-        <div className="flex gap-2 mb-4">
-          <Button size="sm" onClick={() => exportZip(ds.id)}>导出数据集 ZIP</Button>
-          <Button size="sm" variant="outline" onClick={() => exportAnnotations(ds.id)}>导出标注 JSON</Button>
-        </div>
-        <div className="grid grid-cols-3 gap-3">
-          {ds.images.map((img) => (
-            <Card key={img.id} className="p-2 cursor-pointer" onClick={() => {
-              const annos = db.annotations.filter((a) => a.imageId === img.id);
-              alert(`图片 ${img.filename}\n\n${JSON.stringify(annos, null, 2).slice(0, 800)}`);
-            }}>
-              <img src={img.url} className="w-full h-40 object-cover rounded" alt="" />
-              <div className="text-xs mt-1">{img.filename}</div>
-            </Card>
-          ))}
-        </div>
-      </div>
-    );
+    return <DatasetDetail id={viewing} onClose={() => setViewing(null)} exportZip={exportZip} exportAnnotations={exportAnnotations} />;
   }
 
   if (editing !== null) return <DatasetEditor id={editing} onClose={() => setEditing(null)} />;
