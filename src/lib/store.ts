@@ -191,8 +191,15 @@ function seedDB(): DB {
     key: "style",
     name: "款式库",
     fields: [
-      { key: "category", label: "品类", type: "multi", options: ["连衣裙", "上衣", "裤装", "半身裙"], allowCustom: true },
+      { key: "category", label: "品类", type: "multi", options: ["连衣裙", "上衣", "裤装", "半身裙"], allowCustom: true, required: true },
       { key: "silhouette", label: "廓形", type: "multi", options: ["A型", "H型", "X型", "O型"], allowCustom: true },
+      { key: "neckline", label: "领型", type: "multi", options: ["圆领", "V领", "翻领", "高腰", "松紧腰"], allowCustom: true,
+        dependsOn: "category", optionMap: {
+          "连衣裙": ["圆领", "V领", "翻领"],
+          "上衣": ["圆领", "V领", "翻领"],
+          "裤装": ["高腰", "松紧腰"],
+          "半身裙": ["高腰", "松紧腰"],
+        } },
       { key: "style", label: "风格", type: "multi", options: ["简约", "复古", "运动", "通勤", "甜美"], allowCustom: true },
       { key: "craft", label: "工艺类型", type: "multi", options: ["压褶", "印花", "绣花", "洗水"], allowCustom: true },
       { key: "part", label: "部位", type: "multi", options: ["前中部位", "前襟", "袖口", "下摆", "领口"], allowCustom: true },
@@ -215,6 +222,14 @@ function seedDB(): DB {
       { key: "fabric_name", label: "面料名称", type: "text", options: [] },
       { key: "composition", label: "成分", type: "multi", options: ["棉", "麻", "丝", "毛", "化纤"], allowCustom: true },
       { key: "hand_feel", label: "手感", type: "single", options: ["柔软", "适中", "硬挺"] },
+    ],
+  };
+  const commentLib: Library = {
+    key: "comment",
+    name: "客户评语库",
+    fields: [
+      { key: "sentiment", label: "情感倾向", type: "single", options: ["正面", "中性", "负面"] },
+      { key: "topic", label: "主题", type: "multi", options: ["版型", "面料", "做工", "尺码", "物流"], allowCustom: true },
     ],
   };
 
