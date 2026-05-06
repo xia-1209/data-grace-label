@@ -404,7 +404,7 @@ export default function AnnotatorWorkbench() {
           </button>
           {rightCollapsed ? (
             <div className="flex flex-col items-center pt-4 gap-3">
-              <BookOpen className="w-4 h-4 text-muted-foreground" title="标注规范" />
+              <BookOpen className="w-4 h-4 text-muted-foreground" />
               <span className="rotate-90 text-[10px] text-muted-foreground whitespace-nowrap mt-6">辅助面板</span>
             </div>
           ) : (
