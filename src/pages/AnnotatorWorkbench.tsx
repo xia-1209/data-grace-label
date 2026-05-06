@@ -21,7 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
-import { Lock, Pencil, X, Plus, HelpCircle, BookOpen, Sparkles, History, RotateCcw } from "lucide-react";
+import { Lock, Pencil, X, Plus, HelpCircle, BookOpen, Sparkles, History, RotateCcw, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { toast } from "sonner";
 
 interface DraftMap {
