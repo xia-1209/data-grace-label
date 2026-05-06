@@ -26,8 +26,8 @@ export default function AnnotatorTasks() {
           const lib = db.libraries.find((l) => l.key === t.libraryKey);
           const myPerspectives = t.annotators.find((a) => a.userPid === user.pid)?.perspectives || [];
           // image-level rollup status
-          const imgStatuses = (ds?.images || []).map((img) => {
-            const annos = myPerspectives.map((p) => db.annotations.find((a) => a.taskId === t.id && a.imageId === img.id && a.perspective === p));
+          const imgStatuses = (ds?.styles || []).map((s) => {
+            const annos = myPerspectives.map((p) => db.annotations.find((a) => a.taskId === t.id && a.styleId === s.id && a.perspective === p));
             if (annos.every((a) => !a)) return "not_started";
             if (annos.some((a) => a?.status === "rejected")) return "rejected";
             if (annos.some((a) => a?.status === "submitted")) return "submitted";
@@ -52,7 +52,7 @@ export default function AnnotatorTasks() {
                 <Stat label="已通过" value={cnt("approved")} color="bg-green-100 text-green-900" />
                 <Stat label="已打回" value={cnt("rejected")} color="bg-red-100 text-red-900" />
               </div>
-              <div className="text-xs text-muted-foreground">共 {total} 张</div>
+              <div className="text-xs text-muted-foreground">共 {total} 个款式</div>
               <Link to={`/annotator/${t.id}?status=not_started`}>
                 <Button size="sm" className="w-full">开始标注</Button>
               </Link>

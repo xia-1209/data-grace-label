@@ -44,10 +44,16 @@ export interface Library {
   craftPart?: CraftPartConfig;
 }
 
-export interface DatasetImage {
-  id: string;
-  filename: string;
+export interface StyleImage {
   url: string;
+  angle?: string;
+  filename?: string;
+}
+
+export interface DatasetStyle {
+  id: string;          // internal id (uid)
+  styleId: string;     // business style id, unique within dataset
+  images: StyleImage[];
   preselect?: Partial<Record<Perspective, Record<string, string[]>>>;
 }
 
@@ -55,7 +61,7 @@ export interface Dataset {
   id: string;
   name: string;
   description: string;
-  images: DatasetImage[];
+  styles: DatasetStyle[];
   createdAt: number;
   updatedAt: number;
 }
@@ -83,10 +89,21 @@ export interface CraftPartGroup {
   parts: string[];
 }
 
+export interface AnnoVersion {
+  ts: number;
+  status: AnnoStatus;
+  by: string;
+  reason?: string;
+  data?: Record<string, string[] | string>;
+  craftPartGroups?: CraftPartGroup[];
+  customTags?: string[];
+  note?: string; // reviewer internal note
+}
+
 export interface Annotation {
   id: string;
   taskId: string;
-  imageId: string;
+  styleId: string; // refers DatasetStyle.id
   perspective: Perspective;
   status: AnnoStatus;
   data: Record<string, string[] | string>;
@@ -95,7 +112,8 @@ export interface Annotation {
   annotatorPid?: string;
   reviewerPid?: string;
   rejectReason?: string;
-  history: Array<{ ts: number; status: AnnoStatus; by: string; reason?: string }>;
+  reviewerNotes?: string[];
+  history: AnnoVersion[];
   updatedAt: number;
 }
 
@@ -146,7 +164,7 @@ export interface DB {
   ruleVersions: Array<{ id: string; ruleId: string; snapshot: Rule; ts: number }>;
 }
 
-const KEY = "garment_anno_db_v1";
+const KEY = "garment_anno_db_v2";
 
 export const uid = () => Math.random().toString(36).slice(2, 10);
 
@@ -233,16 +251,33 @@ function seedDB(): DB {
     ],
   };
 
-  const images: DatasetImage[] = [
-    { id: "img_1", filename: "dress_a.jpg", url: "https://images.unsplash.com/photo-1551232864-3f0890e580d9?w=800&q=80" },
-    { id: "img_2", filename: "dress_b.jpg", url: "https://images.unsplash.com/photo-1539109136881-3be0616acf4b?w=800&q=80" },
-    { id: "img_3", filename: "top_c.jpg", url: "https://images.unsplash.com/photo-1558769132-cb1aea458c5e?w=800&q=80" },
+  const styles: DatasetStyle[] = [
+    {
+      id: "sty_1", styleId: "STY-001",
+      images: [
+        { url: "https://images.unsplash.com/photo-1551232864-3f0890e580d9?w=800&q=80", angle: "front", filename: "STY-001_front.jpg" },
+        { url: "https://images.unsplash.com/photo-1539109136881-3be0616acf4b?w=800&q=80", angle: "back", filename: "STY-001_back.jpg" },
+      ],
+    },
+    {
+      id: "sty_2", styleId: "STY-002",
+      images: [
+        { url: "https://images.unsplash.com/photo-1558769132-cb1aea458c5e?w=800&q=80", angle: "front", filename: "STY-002_front.jpg" },
+      ],
+    },
+    {
+      id: "sty_3", styleId: "STY-003",
+      images: [
+        { url: "https://images.unsplash.com/photo-1485518882345-15568b007407?w=800&q=80", angle: "front", filename: "STY-003_front.jpg" },
+        { url: "https://images.unsplash.com/photo-1583744946564-b52ac1c389c8?w=800&q=80", angle: "detail", filename: "STY-003_detail.jpg" },
+      ],
+    },
   ];
   const dataset: Dataset = {
     id: "ds_demo",
     name: "演示数据集",
-    description: "包含三张示例服装图片",
-    images,
+    description: "包含三个款式（共 5 张图片）",
+    styles,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -298,9 +333,9 @@ function seedDB(): DB {
   };
 }
 
-export function getAnnotation(taskId: string, imageId: string, perspective: Perspective): Annotation | undefined {
+export function getAnnotation(taskId: string, styleId: string, perspective: Perspective): Annotation | undefined {
   const db = loadDB();
-  return db.annotations.find((a) => a.taskId === taskId && a.imageId === imageId && a.perspective === perspective);
+  return db.annotations.find((a) => a.taskId === taskId && a.styleId === styleId && a.perspective === perspective);
 }
 
 export function upsertAnnotation(a: Annotation) {

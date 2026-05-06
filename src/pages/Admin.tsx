@@ -123,9 +123,9 @@ export function AdminDatasets() {
   const exportZip = async (id: string) => {
     const ds = db.datasets.find((d) => d.id === id)!;
     const zip = new JSZip();
-    const csv = ["filename,id"];
-    ds.images.forEach((img) => csv.push(`${img.filename},${img.id}`));
-    zip.file("labels.csv", csv.join("\n"));
+    const csv = ["style_id,image_url,angle"];
+    ds.styles.forEach((s) => s.images.forEach((im) => csv.push(`${s.styleId},${im.url},${im.angle || ""}`)));
+    zip.file("styles.csv", csv.join("\n"));
     zip.file("dataset.json", JSON.stringify(ds, null, 2));
     const blob = await zip.generateAsync({ type: "blob" });
     saveAs(blob, `${ds.name}.zip`);
@@ -134,9 +134,9 @@ export function AdminDatasets() {
   const exportAnnotations = (id: string) => {
     const ds = db.datasets.find((d) => d.id === id)!;
     const tasks = db.tasks.filter((t) => t.datasetId === id);
-    const merged = ds.images.map((img) => ({
-      image: img,
-      annotations: db.annotations.filter((a) => tasks.find((t) => t.id === a.taskId) && a.imageId === img.id),
+    const merged = ds.styles.map((s) => ({
+      style: s,
+      annotations: db.annotations.filter((a) => tasks.find((t) => t.id === a.taskId) && a.styleId === s.id),
     }));
     const blob = new Blob([JSON.stringify(merged, null, 2)], { type: "application/json" });
     saveAs(blob, `${ds.name}_annotations.json`);
@@ -159,7 +159,7 @@ export function AdminDatasets() {
           <Card key={d.id} className="p-4 flex justify-between items-center">
             <div>
               <div className="font-medium">{d.name}</div>
-              <div className="text-xs text-muted-foreground">{d.images.length} 张图片 · 创建 {new Date(d.createdAt).toLocaleDateString()}</div>
+              <div className="text-xs text-muted-foreground">{d.styles.length} 个款式 · {d.styles.reduce((n, s) => n + s.images.length, 0)} 张图 · 创建 {new Date(d.createdAt).toLocaleDateString()}</div>
             </div>
             <div className="flex gap-2">
               <Button size="sm" variant="outline" onClick={() => setViewing(d.id)}>详情</Button>
@@ -180,21 +180,12 @@ function DatasetEditor({ id, onClose }: { id: string; onClose: () => void }) {
   const ex = db.datasets.find((d) => d.id === id);
   const [name, setName] = useState(ex?.name || "");
   const [desc, setDesc] = useState(ex?.description || "");
-  const [images, setImages] = useState(ex?.images || []);
+  const [styles, setStyles] = useState(ex?.styles || []);
   const [search, setSearch] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  const handleFiles = (files: FileList | null) => {
-    if (!files) return;
-    Array.from(files).forEach((f) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        setImages((prev) => [...prev, { id: uid(), filename: f.name, url: reader.result as string }]);
-      };
-      reader.readAsDataURL(f);
-    });
-  };
-
-  const handleSheet = async (file: File) => {
+  const handleStylesCsv = async (file: File) => {
+    setBusy(true);
     try {
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf);
@@ -203,50 +194,89 @@ function DatasetEditor({ id, onClose }: { id: string; onClose: () => void }) {
       if (rows.length === 0) { toast.error("表格为空"); return; }
       const headers = Object.keys(rows[0]);
       const missing: string[] = [];
-      if (!headers.includes("图片文件名") && !headers.includes("filename")) missing.push("图片文件名");
+      if (!headers.includes("style_id") && !headers.includes("款式ID")) missing.push("style_id");
+      if (!headers.includes("image_url") && !headers.includes("图片URL")) missing.push("image_url");
+      if (missing.length > 0) { toast.error(`缺少列：${missing.join(", ")}`); return; }
+      const next = [...styles];
+      let added = 0; const errors: string[] = [];
+      rows.forEach((r, idx) => {
+        const sid = String(r.style_id || r["款式ID"] || "").trim();
+        const url = String(r.image_url || r["图片URL"] || "").trim();
+        const angle = String(r.angle || r["角度"] || "").trim();
+        if (!sid) { errors.push(`第 ${idx + 2} 行：缺少 style_id`); return; }
+        if (!url) { errors.push(`第 ${idx + 2} 行：缺少 image_url`); return; }
+        let s = next.find((ss) => ss.styleId === sid);
+        if (!s) { s = { id: uid(), styleId: sid, images: [] }; next.push(s); }
+        s.images.push({ url, angle: angle || undefined, filename: url.split("/").pop() });
+        added++;
+      });
+      setStyles(next);
+      if (errors.length > 0) toast.error(`成功 ${added} 行，失败 ${errors.length} 行：${errors.slice(0, 3).join("; ")}`);
+      else toast.success(`成功导入 ${added} 行（共 ${next.length} 个款式）`);
+    } catch (e: any) {
+      toast.error(`解析失败：${e.message}`);
+    } finally { setBusy(false); }
+  };
+
+  const handlePreselect = async (file: File) => {
+    setBusy(true);
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows: any[] = XLSX.utils.sheet_to_json(ws);
+      if (rows.length === 0) { toast.error("表格为空"); return; }
+      const headers = Object.keys(rows[0]);
+      const missing: string[] = [];
+      if (!headers.includes("style_id")) missing.push("style_id");
       if (!headers.includes("perspective")) missing.push("perspective");
       if (missing.length > 0) { toast.error(`缺少列：${missing.join(", ")}`); return; }
+      const next = [...styles];
       let ok = 0; const errors: string[] = [];
-      const next = [...images];
       rows.forEach((r, idx) => {
-        const fn = r["图片文件名"] || r.filename;
-        const persp = r["perspective"];
-        const target = next.find((i) => i.filename === fn);
-        if (!target) { errors.push(`第 ${idx + 2} 行：图片文件名 ${fn} 在数据集中不存在`); return; }
+        const sid = String(r.style_id);
+        const persp = r.perspective;
+        const target = next.find((s) => s.styleId === sid);
+        if (!target) { errors.push(`第 ${idx + 2} 行：款式ID ${sid} 不存在`); return; }
         if (!["production_tob", "commercial_tob", "commercial_toc"].includes(persp)) {
-          errors.push(`第 ${idx + 2} 行：perspective 值 ${persp} 无效`); return;
+          errors.push(`第 ${idx + 2} 行：perspective ${persp} 无效`); return;
         }
         target.preselect = target.preselect || {};
         const obj: Record<string, string[]> = {};
         Object.keys(r).forEach((k) => {
-          if (k === "图片文件名" || k === "filename" || k === "perspective") return;
+          if (["style_id", "perspective"].includes(k)) return;
           obj[k] = String(r[k]).split(",").map((s) => s.trim()).filter(Boolean);
         });
         target.preselect[persp as Perspective] = obj;
         ok++;
       });
-      setImages(next);
-      if (errors.length > 0) toast.error(`成功 ${ok} 行，失败 ${errors.length} 行\n${errors.slice(0, 3).join("\n")}`);
-      else toast.success(`成功导入 ${ok} 行`);
+      setStyles(next);
+      if (errors.length > 0) toast.error(`成功 ${ok} 行，失败 ${errors.length} 行：${errors.slice(0, 3).join("; ")}`);
+      else toast.success(`成功导入 ${ok} 行预选标签`);
     } catch (e: any) {
       toast.error(`解析失败：${e.message}`);
-    }
+    } finally { setBusy(false); }
+  };
+
+  const downloadTemplate = () => {
+    const csv = "style_id,image_url,angle\nSTY-001,https://example.com/a.jpg,front\nSTY-001,https://example.com/b.jpg,back\nSTY-002,https://example.com/c.jpg,front";
+    saveAs(new Blob([csv], { type: "text/csv" }), "styles_template.csv");
   };
 
   const save = () => {
     const x = loadDB();
     if (isNew) {
-      x.datasets.push({ id: uid(), name, description: desc, images, createdAt: Date.now(), updatedAt: Date.now() });
+      x.datasets.push({ id: uid(), name, description: desc, styles, createdAt: Date.now(), updatedAt: Date.now() });
     } else {
       const i = x.datasets.findIndex((d) => d.id === id);
-      x.datasets[i] = { ...x.datasets[i], name, description: desc, images, updatedAt: Date.now() };
+      x.datasets[i] = { ...x.datasets[i], name, description: desc, styles, updatedAt: Date.now() };
     }
     saveDB(x);
     toast.success("已保存");
     onClose();
   };
 
-  const filtered = images.filter((i) => i.filename.toLowerCase().includes(search.toLowerCase()));
+  const filtered = styles.filter((s) => s.styleId.toLowerCase().includes(search.toLowerCase()));
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-4">
@@ -258,27 +288,51 @@ function DatasetEditor({ id, onClose }: { id: string; onClose: () => void }) {
         <label className="text-sm">描述</label>
         <Input value={desc} onChange={(e) => setDesc(e.target.value)} />
       </div>
+
       <Card className="p-4 space-y-2">
         <div className="flex items-center justify-between">
-          <h3 className="font-semibold">图片管理 ({images.length})</h3>
-          <Input placeholder="搜索文件名" value={search} onChange={(e) => setSearch(e.target.value)} className="w-48 h-8" />
+          <h3 className="font-semibold">款式上传 (CSV/XLSX) {busy && <span className="text-xs text-primary ml-2">解析中…</span>}</h3>
+          <Button size="sm" variant="outline" onClick={downloadTemplate}>下载模板</Button>
         </div>
-        <input type="file" accept="image/*" multiple onChange={(e) => handleFiles(e.target.files)} />
-        <div className="grid grid-cols-4 gap-2">
-          {filtered.map((img) => (
-            <div key={img.id} className="relative">
-              <img src={img.url} className="w-full h-24 object-cover rounded" alt="" />
-              <div className="text-xs truncate">{img.filename}</div>
-              <button className="absolute top-1 right-1 bg-destructive text-white rounded px-1 text-xs" onClick={() => setImages((p) => p.filter((x) => x.id !== img.id))}>×</button>
+        <p className="text-xs text-muted-foreground">列：style_id, image_url, angle（可选）。同 style_id 的多行自动归为一个款式的多张图。</p>
+        <input type="file" accept=".csv,.xlsx" onChange={(e) => e.target.files?.[0] && handleStylesCsv(e.target.files[0])} />
+      </Card>
+
+      <Card className="p-4 space-y-2">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold">预选标签上传 (CSV/XLSX)</h3>
+        </div>
+        <p className="text-xs text-muted-foreground">列：style_id, perspective, 其他字段（多值用逗号分隔）。</p>
+        <input type="file" accept=".csv,.xlsx" onChange={(e) => e.target.files?.[0] && handlePreselect(e.target.files[0])} />
+      </Card>
+
+      <Card className="p-4 space-y-2">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold">款式管理 ({styles.length})</h3>
+          <Input placeholder="搜索款式ID" value={search} onChange={(e) => setSearch(e.target.value)} className="w-48 h-8" />
+        </div>
+        <div className="space-y-2 max-h-96 overflow-auto">
+          {filtered.map((s) => (
+            <div key={s.id} className="border rounded p-2 flex gap-2 items-center">
+              <div className="font-medium text-sm w-24">{s.styleId}</div>
+              <div className="flex gap-1 flex-1 overflow-auto">
+                {s.images.map((im, i) => (
+                  <div key={i} className="relative">
+                    <img src={im.url} className="w-14 h-14 object-cover rounded" alt="" />
+                    <div className="text-[10px] text-center">{im.angle || ""}</div>
+                  </div>
+                ))}
+              </div>
+              <Button size="sm" variant="ghost" onClick={() => {
+                if (!confirm(`删除款式 ${s.styleId}?`)) return;
+                setStyles((p) => p.filter((x) => x.id !== s.id));
+              }}>删除</Button>
             </div>
           ))}
+          {filtered.length === 0 && <div className="text-xs text-muted-foreground">暂无款式</div>}
         </div>
       </Card>
-      <Card className="p-4 space-y-2">
-        <h3 className="font-semibold">预选标签上传 (CSV/XLSX)</h3>
-        <p className="text-xs text-muted-foreground">需包含列：图片文件名、perspective、其它字段</p>
-        <input type="file" accept=".csv,.xlsx" onChange={(e) => e.target.files?.[0] && handleSheet(e.target.files[0])} />
-      </Card>
+
       <Button onClick={save}>保存</Button>
     </div>
   );
@@ -351,7 +405,7 @@ export function AdminTasks() {
       <div className="space-y-3">
         {filtered.map((t) => {
           const ds = db.datasets.find((d) => d.id === t.datasetId);
-          const total = (ds?.images.length || 0);
+          const total = (ds?.styles.length || 0);
           const submitted = db.annotations.filter((a) => a.taskId === t.id && ["submitted", "approved"].includes(a.status)).length;
           return (
             <Card key={t.id} className="p-4">
@@ -378,7 +432,7 @@ export function AdminTasks() {
                 <div className="text-xs font-medium">已提交标注（可强制打回）：</div>
                 {db.annotations.filter((a) => a.taskId === t.id).slice(0, 5).map((a) => (
                   <div key={a.id} className="text-xs flex items-center gap-2 border-t pt-1">
-                    <span>{a.imageId}</span><span>{PERSPECTIVE_LABEL[a.perspective]}</span><span>[{a.status}]</span>
+                    <span>{a.styleId}</span><span>{PERSPECTIVE_LABEL[a.perspective]}</span><span>[{a.status}]</span>
                     {a.status !== "rejected" && <Button size="sm" variant="ghost" className="h-6" onClick={() => forceReject(a.id)}>强制打回</Button>}
                   </div>
                 ))}
@@ -874,28 +928,28 @@ function DatasetDetail({ id, onClose, exportZip, exportAnnotations }: {
   const ds = db.datasets.find((d) => d.id === id);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
-  const [viewImg, setViewImg] = useState<string | null>(null);
+  const [viewSty, setViewSty] = useState<string | null>(null);
   if (!ds) return <div className="p-6">数据集不存在</div>;
 
-  const filtered = ds.images.filter((i) => i.filename.toLowerCase().includes(search.toLowerCase()));
+  const filtered = ds.styles.filter((s) => s.styleId.toLowerCase().includes(search.toLowerCase()));
 
   const batchDelete = () => {
     if (selected.size === 0) return;
-    if (!confirm(`确认删除 ${selected.size} 张图片及关联标注？`)) return;
+    if (!confirm(`确认删除 ${selected.size} 个款式及关联标注？`)) return;
     const x = loadDB();
     const di = x.datasets.findIndex((d) => d.id === id);
-    x.datasets[di].images = x.datasets[di].images.filter((i) => !selected.has(i.id));
-    x.annotations = x.annotations.filter((a) => !selected.has(a.imageId));
+    x.datasets[di].styles = x.datasets[di].styles.filter((s) => !selected.has(s.id));
+    x.annotations = x.annotations.filter((a) => !selected.has(a.styleId));
     saveDB(x);
     setSelected(new Set());
     toast.success("已批量删除");
   };
 
-  const exportImageJson = (imgId: string) => {
-    const annos = db.annotations.filter((a) => a.imageId === imgId);
-    const img = ds.images.find((i) => i.id === imgId);
-    const blob = new Blob([JSON.stringify({ image: img, annotations: annos }, null, 2)], { type: "application/json" });
-    saveAs(blob, `${img?.filename || imgId}.json`);
+  const exportStyleJson = (sId: string) => {
+    const annos = db.annotations.filter((a) => a.styleId === sId);
+    const sty = ds.styles.find((s) => s.id === sId);
+    const blob = new Blob([JSON.stringify({ style: sty, annotations: annos }, null, 2)], { type: "application/json" });
+    saveAs(blob, `${sty?.styleId || sId}.json`);
   };
 
   return (
@@ -904,48 +958,54 @@ function DatasetDetail({ id, onClose, exportZip, exportAnnotations }: {
       <div className="flex justify-between items-center my-3">
         <h1 className="text-2xl font-bold">{ds.name}</h1>
         <div className="flex gap-2">
-          <Input placeholder="搜索文件名" value={search} onChange={(e) => setSearch(e.target.value)} className="w-48" />
+          <Input placeholder="搜索款式ID" value={search} onChange={(e) => setSearch(e.target.value)} className="w-48" />
           <Button size="sm" onClick={() => exportZip(ds.id)}>导出 ZIP</Button>
           <Button size="sm" variant="outline" onClick={() => exportAnnotations(ds.id)}>导出标注 JSON</Button>
         </div>
       </div>
       {selected.size > 0 && (
         <div className="bg-card border rounded p-2 mb-3 flex gap-2 items-center">
-          <span className="text-sm">已选 {selected.size} 张</span>
+          <span className="text-sm">已选 {selected.size} 个</span>
           <Button size="sm" variant="destructive" onClick={batchDelete}>批量删除</Button>
           <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>清空</Button>
         </div>
       )}
       <div className="grid grid-cols-3 gap-3">
-        {filtered.map((img) => (
-          <Card key={img.id} className="p-2 relative">
+        {filtered.map((s) => (
+          <Card key={s.id} className="p-2 relative">
             <input type="checkbox" className="absolute top-2 left-2 z-10"
-              checked={selected.has(img.id)}
+              checked={selected.has(s.id)}
               onChange={(e) => {
-                const s = new Set(selected);
-                if (e.target.checked) s.add(img.id); else s.delete(img.id);
-                setSelected(s);
+                const set = new Set(selected);
+                if (e.target.checked) set.add(s.id); else set.delete(s.id);
+                setSelected(set);
               }} />
-            <img src={img.url} className="w-full h-40 object-cover rounded cursor-pointer" alt="" onClick={() => setViewImg(img.id)} />
-            <div className="text-xs mt-1 truncate">{img.filename}</div>
+            <div className="grid grid-cols-2 gap-1 cursor-pointer" onClick={() => setViewSty(s.id)}>
+              {s.images.slice(0, 4).map((im, i) => (
+                <img key={i} src={im.url} className="w-full h-20 object-cover rounded" alt="" />
+              ))}
+            </div>
+            <div className="text-xs mt-1 font-medium">{s.styleId} <span className="text-muted-foreground">({s.images.length} 图)</span></div>
           </Card>
         ))}
       </div>
 
-      <Dialog open={!!viewImg} onOpenChange={(o) => !o && setViewImg(null)}>
+      <Dialog open={!!viewSty} onOpenChange={(o) => !o && setViewSty(null)}>
         <DialogContent className="max-w-3xl">
-          <DialogHeader><DialogTitle>图片标注详情</DialogTitle></DialogHeader>
-          {viewImg && (() => {
-            const img = ds.images.find((i) => i.id === viewImg)!;
-            const annos = db.annotations.filter((a) => a.imageId === viewImg);
+          <DialogHeader><DialogTitle>款式标注详情</DialogTitle></DialogHeader>
+          {viewSty && (() => {
+            const sty = ds.styles.find((s) => s.id === viewSty)!;
+            const annos = db.annotations.filter((a) => a.styleId === viewSty);
             return (
               <div className="space-y-3 max-h-[70vh] overflow-auto">
-                <div className="flex gap-3">
-                  <img src={img.url} className="w-40 h-40 object-cover rounded" alt="" />
-                  <div className="text-sm">
-                    <div><b>{img.filename}</b></div>
-                    <Button size="sm" variant="outline" className="mt-2" onClick={() => exportImageJson(viewImg)}>导出该图标注 JSON</Button>
-                  </div>
+                <div className="flex gap-3 flex-wrap">
+                  {sty.images.map((im, i) => (
+                    <img key={i} src={im.url} className="w-32 h-32 object-cover rounded" alt="" />
+                  ))}
+                </div>
+                <div>
+                  <b>{sty.styleId}</b>
+                  <Button size="sm" variant="outline" className="ml-2" onClick={() => exportStyleJson(viewSty)}>导出该款式标注 JSON</Button>
                 </div>
                 {PERSPECTIVES.map((p) => {
                   const a = annos.find((x) => x.perspective === p);
