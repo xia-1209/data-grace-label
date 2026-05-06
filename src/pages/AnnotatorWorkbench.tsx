@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Lock, Pencil, X, Plus, HelpCircle, BookOpen, Sparkles, History, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
@@ -553,14 +554,42 @@ function PerspectiveForm({
                 <div className="flex flex-wrap gap-2">
                   {[...new Set([...availableOptions, ...selected])].map((opt) => {
                     const rule = getRule(f.key, opt);
+                    const published = rule && rule.status === "published" ? rule : undefined;
                     return (
-                      <button key={opt} disabled={!editable} onClick={() => toggleOption(f.key, opt)}
-                        className={`px-3 py-1 rounded-full border text-xs flex items-center gap-1 ${
-                          selected.includes(opt) ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-muted"
-                        } ${!editable ? "opacity-70 cursor-not-allowed" : ""}`}
-                        title={rule ? `${rule.definition}\n${rule.criteria}` : "暂无规则"}>
-                        {opt}<HelpCircle className="w-3 h-3 opacity-60" />
-                      </button>
+                      <div key={opt} className="flex items-center">
+                        <button disabled={!editable} onClick={() => toggleOption(f.key, opt)}
+                          className={`px-3 py-1 rounded-l-full border text-xs flex items-center gap-1 ${
+                            selected.includes(opt) ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-muted"
+                          } ${!editable ? "opacity-70 cursor-not-allowed" : ""}`}>
+                          {opt}
+                        </button>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <button className="px-1.5 py-1 rounded-r-full border border-l-0 hover:bg-muted" title="规则">
+                              <HelpCircle className="w-3 h-3 opacity-60" />
+                            </button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-72 text-xs space-y-1.5">
+                            <div className="font-semibold">{opt} {published ? <span className="text-[10px] text-primary ml-1">[已发布]</span> : <span className="text-[10px] text-muted-foreground ml-1">[暂无规则]</span>}</div>
+                            {published ? (
+                              <>
+                                <div><b>定义：</b>{published.definition || "—"}</div>
+                                <div><b>判断标准：</b>{published.criteria || "—"}</div>
+                                {published.exclusive?.length > 0 && <div><b>互斥：</b>{published.exclusive.join(", ")}</div>}
+                                {published.dependency && <div><b>依赖：</b>{published.dependency}</div>}
+                                {published.notRecommended && <div className="text-destructive">⚠ 默认不推荐</div>}
+                                {published.positiveImages?.length > 0 && (
+                                  <div className="flex gap-1 flex-wrap pt-1">
+                                    {published.positiveImages.map((u, i) => <img key={i} src={u} className="w-14 h-14 object-cover rounded" alt="" />)}
+                                  </div>
+                                )}
+                              </>
+                            ) : (
+                              <div className="text-muted-foreground">该标签尚未配置规则</div>
+                            )}
+                          </PopoverContent>
+                        </Popover>
+                      </div>
                     );
                   })}
                 </div>

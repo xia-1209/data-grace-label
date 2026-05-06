@@ -16,10 +16,42 @@ const COLORS = ["#6366f1", "#a855f7", "#ec4899", "#f59e0b", "#10b981"];
 
 export function AdminDashboard() {
   const db = useDB();
-  const total = db.annotations.length;
-  const submitted = db.annotations.filter((a) => a.status === "submitted").length;
-  const approved = db.annotations.filter((a) => a.status === "approved").length;
-  const rejected = db.annotations.filter((a) => a.status === "rejected").length;
+  const totalTasks = db.tasks.length;
+  const totalStyles = db.datasets.reduce((n, d) => n + d.styles.length, 0);
+  const totalAnnotators = db.users.filter((u) => u.role === "annotator").length;
+  const submittedOrApproved = db.annotations.filter((a) => ["submitted", "approved"].includes(a.status)).length;
+  const totalSlots = db.tasks.reduce((n, t) => {
+    const ds = db.datasets.find((d) => d.id === t.datasetId);
+    const persSet = new Set<string>();
+    t.annotators.forEach((a) => a.perspectives.forEach((p) => persSet.add(p)));
+    return n + (ds?.styles.length || 0) * persSet.size;
+  }, 0);
+  const completionRate = totalSlots ? Math.round((submittedOrApproved / totalSlots) * 100) : 0;
+
+  // 7-day submit trend
+  const trend = Array.from({ length: 7 }, (_, i) => {
+    const day = new Date(Date.now() - (6 - i) * 86400000);
+    const ds = day.toISOString().slice(0, 10);
+    const c = db.annotations.filter((a) =>
+      a.history.some((h) => h.status === "submitted" && new Date(h.ts).toISOString().slice(0, 10) === ds)
+    ).length || db.annotations.filter((a) => new Date(a.updatedAt).toISOString().slice(0, 10) === ds).length;
+    return { day: ds.slice(5), count: c };
+  });
+
+  // Reject rate per task
+  const rejectByTask = db.tasks.map((t) => {
+    const subs = db.annotations.filter((a) => a.taskId === t.id && ["submitted", "approved", "rejected"].includes(a.status)).length;
+    const rej = db.annotations.filter((a) => a.taskId === t.id && a.status === "rejected").length;
+    return { name: t.name.slice(0, 10), rate: subs ? Math.round((rej / subs) * 100) : 0 };
+  });
+
+  // Annotator workload
+  const workload = db.users.filter((u) => u.role === "annotator").map((u) => ({
+    name: u.username,
+    count: db.annotations.filter((a) => a.annotatorPid === u.pid && ["submitted", "approved"].includes(a.status)).length,
+  })).sort((a, b) => b.count - a.count);
+
+  // Tag heatmap top10
   const tagDist: Record<string, number> = {};
   db.annotations.forEach((a) => {
     Object.values(a.data).forEach((vals) => {
@@ -28,21 +60,16 @@ export function AdminDashboard() {
       });
     });
   });
-  const tagData = Object.entries(tagDist).slice(0, 8).map(([name, value]) => ({ name, value }));
-  const trend = Array.from({ length: 7 }, (_, i) => {
-    const day = new Date(Date.now() - (6 - i) * 86400000);
-    const ds = day.toISOString().slice(0, 10);
-    const c = db.annotations.filter((a) => new Date(a.updatedAt).toISOString().slice(0, 10) === ds).length;
-    return { day: ds.slice(5), count: c };
-  });
+  const topTags = Object.entries(tagDist).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, value]) => ({ name, value }));
 
   const restoreBackup = async (file: File) => {
     if (!confirm("恢复将覆盖所有当前数据，确认？")) return;
     const text = await file.text();
     try {
       const data = JSON.parse(text);
-      localStorage.setItem("garment_anno_db_v1", JSON.stringify(data));
+      localStorage.setItem("garment_anno_db_v2", JSON.stringify(data));
       window.dispatchEvent(new CustomEvent("db-updated"));
+      log("backup_restore", "admin");
       toast.success("已恢复");
     } catch { toast.error("JSON 解析失败"); }
   };
@@ -54,6 +81,7 @@ export function AdminDashboard() {
     );
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     saveAs(blob, `annotations_export.json`);
+    log("export_filtered", "admin", `tag=${tag}`);
   };
 
   return (
@@ -62,38 +90,56 @@ export function AdminDashboard() {
         <h1 className="text-2xl font-bold">仪表盘</h1>
         <div className="flex gap-2">
           <Button size="sm" variant="outline" onClick={filteredExport}>过滤导出 JSON</Button>
-          <Button size="sm" variant="outline" onClick={adminBackupExport}>导出全量备份</Button>
+          <Button size="sm" variant="outline" onClick={() => { adminBackupExport(); log("backup_export", "admin"); }}>导出全量备份</Button>
           <label className="inline-flex">
             <input type="file" accept=".json" className="hidden" onChange={(e) => e.target.files?.[0] && restoreBackup(e.target.files[0])} />
             <span className="cursor-pointer text-sm border rounded px-3 py-1.5 hover:bg-muted">恢复备份</span>
           </label>
+          <Button size="sm" variant="destructive" onClick={() => { if (confirm("确定重置演示数据？")) { resetDemo(); toast.success("已重置"); } }}>重置演示数据</Button>
         </div>
       </div>
-      <div className="grid grid-cols-4 gap-4">
-        <StatCard label="总标注数" v={total} />
-        <StatCard label="待审核" v={submitted} />
-        <StatCard label="已通过" v={approved} />
-        <StatCard label="已打回" v={rejected} />
+      <div className="grid grid-cols-5 gap-3">
+        <StatCard label="任务包总数" v={totalTasks} />
+        <StatCard label="款式总数" v={totalStyles} />
+        <StatCard label="标注员人数" v={totalAnnotators} />
+        <StatCard label="完成率 %" v={completionRate} />
+        <StatCard label="待审核" v={db.annotations.filter((a) => a.status === "submitted").length} />
       </div>
       <div className="grid grid-cols-2 gap-4">
         <Card className="p-4">
-          <h3 className="font-semibold mb-2">标签分布</h3>
-          <ResponsiveContainer width="100%" height={250}>
-            <PieChart>
-              <Pie data={tagData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label>
-                {tagData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          </ResponsiveContainer>
-        </Card>
-        <Card className="p-4">
-          <h3 className="font-semibold mb-2">近一周标注趋势</h3>
-          <ResponsiveContainer width="100%" height={250}>
+          <h3 className="font-semibold mb-2">近一周提交趋势</h3>
+          <ResponsiveContainer width="100%" height={220}>
             <LineChart data={trend}>
               <XAxis dataKey="day" /><YAxis allowDecimals={false} /><Tooltip />
               <Line dataKey="count" stroke="hsl(var(--primary))" strokeWidth={2} />
             </LineChart>
+          </ResponsiveContainer>
+        </Card>
+        <Card className="p-4">
+          <h3 className="font-semibold mb-2">各任务包打回率 (%)</h3>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={rejectByTask}>
+              <XAxis dataKey="name" /><YAxis /><Tooltip />
+              <Bar dataKey="rate" fill={COLORS[2]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>
+        <Card className="p-4">
+          <h3 className="font-semibold mb-2">标注员工作量</h3>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={workload}>
+              <XAxis dataKey="name" /><YAxis allowDecimals={false} /><Tooltip />
+              <Bar dataKey="count" fill={COLORS[0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>
+        <Card className="p-4">
+          <h3 className="font-semibold mb-2">Top10 标签使用频率</h3>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={topTags} layout="vertical">
+              <XAxis type="number" /><YAxis type="category" dataKey="name" width={70} /><Tooltip />
+              <Bar dataKey="value" fill={COLORS[1]} />
+            </BarChart>
           </ResponsiveContainer>
         </Card>
       </div>
@@ -639,6 +685,8 @@ export function AdminUsers() {
 export function AdminRules() {
   const db = useDB();
   const [editing, setEditing] = useState<any>(null);
+  const [filterLib, setFilterLib] = useState("");
+  const [filterField, setFilterField] = useState("");
 
   const save = () => {
     const x = loadDB();
@@ -648,7 +696,10 @@ export function AdminRules() {
       x.ruleVersions.push({ id: uid(), ruleId: editing.id, snapshot: x.rules[i], ts: Date.now() });
       x.rules[i] = { ...editing, updatedAt: Date.now() };
     }
-    saveDB(x); setEditing(null); toast.success("已保存");
+    saveDB(x);
+    if (editing.status === "published") log("rule_publish", "admin", `${editing.libraryKey}/${editing.fieldKey}/${editing.optionValue}`);
+    else log("rule_save", "admin", `${editing.libraryKey}/${editing.fieldKey}/${editing.optionValue}`);
+    setEditing(null); toast.success("已保存");
   };
 
   const del = (id: string) => {
@@ -658,18 +709,70 @@ export function AdminRules() {
     saveDB(x);
   };
 
+  const exportRules = () => {
+    const blob = new Blob([JSON.stringify(db.rules, null, 2)], { type: "application/json" });
+    saveAs(blob, "rules.json");
+    log("rule_export", "admin");
+  };
+  const importRules = async (file: File) => {
+    try {
+      const txt = await file.text();
+      const arr = JSON.parse(txt);
+      if (!Array.isArray(arr)) throw new Error("应为数组");
+      const x = loadDB();
+      arr.forEach((r) => {
+        const i = x.rules.findIndex((rr) => rr.id === r.id);
+        if (i >= 0) x.rules[i] = r; else x.rules.push(r);
+      });
+      saveDB(x);
+      log("rule_import", "admin", `${arr.length} 条`);
+      toast.success(`已导入 ${arr.length} 条`);
+    } catch (e: any) { toast.error(`导入失败：${e.message}`); }
+  };
+
+  const handleImageUpload = async (files: FileList | null) => {
+    if (!files) return;
+    const list = Array.from(files).slice(0, 3 - (editing.positiveImages?.length || 0));
+    const reads = await Promise.all(list.map((f) => new Promise<string>((res) => {
+      const r = new FileReader();
+      r.onload = () => res(String(r.result));
+      r.readAsDataURL(f);
+    })));
+    setEditing({ ...editing, positiveImages: [...(editing.positiveImages || []), ...reads].slice(0, 3) });
+  };
+
+  const filtered = db.rules.filter((r) =>
+    (!filterLib || r.libraryKey === filterLib) && (!filterField || r.fieldKey.includes(filterField))
+  );
+
+  const curLib = db.libraries.find((l) => l.key === (editing?.libraryKey));
+  const curField = curLib?.fields.find((f) => f.key === editing?.fieldKey);
+
   return (
     <div className="p-6 max-w-5xl mx-auto">
-      <div className="flex justify-between mb-3">
+      <div className="flex justify-between mb-3 items-center gap-2">
         <h1 className="text-2xl font-bold">打标规则管理</h1>
-        <Button onClick={() => setEditing({ __new: true, libraryKey: db.libraries[0]?.key, fieldKey: "", optionValue: "", definition: "", criteria: "", positiveImages: [], exclusive: [], dependency: "", notRecommended: false, notes: "", status: "draft" })}>新建规则</Button>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={exportRules}>导出 JSON</Button>
+          <label className="text-sm border rounded px-3 py-1.5 cursor-pointer hover:bg-muted">导入 JSON
+            <input type="file" accept=".json" className="hidden" onChange={(e) => e.target.files?.[0] && importRules(e.target.files[0])} />
+          </label>
+          <Button onClick={() => setEditing({ __new: true, libraryKey: db.libraries[0]?.key, fieldKey: "", optionValue: "", definition: "", criteria: "", positiveImages: [], exclusive: [], dependency: "", notRecommended: false, notes: "", status: "draft" })}>新建规则</Button>
+        </div>
+      </div>
+      <div className="flex gap-2 mb-3">
+        <select className="border rounded px-2 py-1.5 text-sm" value={filterLib} onChange={(e) => setFilterLib(e.target.value)}>
+          <option value="">所有库</option>
+          {db.libraries.map((l) => <option key={l.key} value={l.key}>{l.name}</option>)}
+        </select>
+        <Input placeholder="按字段筛选" value={filterField} onChange={(e) => setFilterField(e.target.value)} className="w-48 h-8" />
       </div>
       <div className="space-y-2">
-        {db.rules.map((r) => (
+        {filtered.map((r) => (
           <Card key={r.id} className="p-3 flex justify-between items-center">
             <div>
               <div className="font-medium">{r.libraryKey} / {r.fieldKey} / {r.optionValue}</div>
-              <div className="text-xs text-muted-foreground">{r.definition} <span className="ml-2">[{r.status}]</span></div>
+              <div className="text-xs text-muted-foreground">{r.definition} <span className="ml-2">[{r.status}]</span> {r.positiveImages?.length > 0 && <span className="ml-2">📷 {r.positiveImages.length}</span>}</div>
             </div>
             <div className="flex gap-2">
               <Button size="sm" variant="outline" onClick={() => setEditing({ ...r })}>编辑</Button>
@@ -682,12 +785,53 @@ export function AdminRules() {
       {editing && (
         <Card className="p-4 mt-4 space-y-2">
           <h3 className="font-semibold">规则编辑</h3>
-          <Input placeholder="字段key" value={editing.fieldKey} onChange={(e) => setEditing({ ...editing, fieldKey: e.target.value })} />
-          <Input placeholder="标签值" value={editing.optionValue} onChange={(e) => setEditing({ ...editing, optionValue: e.target.value })} />
+          <select className="border rounded px-2 py-2 w-full text-sm" value={editing.libraryKey} onChange={(e) => setEditing({ ...editing, libraryKey: e.target.value, fieldKey: "" })}>
+            {db.libraries.map((l) => <option key={l.key} value={l.key}>{l.name}</option>)}
+          </select>
+          <select className="border rounded px-2 py-2 w-full text-sm" value={editing.fieldKey} onChange={(e) => setEditing({ ...editing, fieldKey: e.target.value, optionValue: "" })}>
+            <option value="">选择字段</option>
+            {curLib?.fields.filter((f) => f.type !== "text").map((f) => <option key={f.key} value={f.key}>{f.label} ({f.key})</option>)}
+          </select>
+          <select className="border rounded px-2 py-2 w-full text-sm" value={editing.optionValue} onChange={(e) => setEditing({ ...editing, optionValue: e.target.value })}>
+            <option value="">选择标签值</option>
+            {curField?.options.map((o) => <option key={o} value={o}>{o}</option>)}
+          </select>
           <Input placeholder="定义" value={editing.definition} onChange={(e) => setEditing({ ...editing, definition: e.target.value })} />
           <Input placeholder="判断标准" value={editing.criteria} onChange={(e) => setEditing({ ...editing, criteria: e.target.value })} />
-          <Input placeholder="互斥标签 (逗号分隔)" value={editing.exclusive.join(",")} onChange={(e) => setEditing({ ...editing, exclusive: e.target.value.split(",").map((s: string) => s.trim()).filter(Boolean) })} />
-          <Input placeholder="依赖条件" value={editing.dependency} onChange={(e) => setEditing({ ...editing, dependency: e.target.value })} />
+          <div>
+            <div className="text-xs mb-1">互斥标签（同字段）：</div>
+            <div className="flex flex-wrap gap-1">
+              {curField?.options.filter((o) => o !== editing.optionValue).map((o) => (
+                <label key={o} className="text-xs border rounded px-2 py-1 flex items-center gap-1">
+                  <input type="checkbox" checked={editing.exclusive.includes(o)} onChange={() => setEditing({
+                    ...editing,
+                    exclusive: editing.exclusive.includes(o) ? editing.exclusive.filter((x: string) => x !== o) : [...editing.exclusive, o],
+                  })} />{o}
+                </label>
+              ))}
+            </div>
+          </div>
+          <Input placeholder='依赖条件 e.g. category == "连衣裙"' value={editing.dependency} onChange={(e) => setEditing({ ...editing, dependency: e.target.value })} />
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={editing.notRecommended} onChange={(e) => setEditing({ ...editing, notRecommended: e.target.checked })} />
+            默认不推荐
+          </label>
+          <div>
+            <div className="text-xs mb-1">正例图（最多3张）：</div>
+            <div className="flex gap-2 flex-wrap mb-1">
+              {(editing.positiveImages || []).map((img: string, i: number) => (
+                <div key={i} className="relative">
+                  <img src={img} className="w-20 h-20 object-cover rounded" alt="" />
+                  <button className="absolute top-0 right-0 bg-destructive text-destructive-foreground text-xs w-5 h-5 rounded-full" onClick={() =>
+                    setEditing({ ...editing, positiveImages: editing.positiveImages.filter((_: any, j: number) => j !== i) })
+                  }>×</button>
+                </div>
+              ))}
+            </div>
+            {(editing.positiveImages?.length || 0) < 3 && (
+              <input type="file" accept="image/*" multiple onChange={(e) => handleImageUpload(e.target.files)} />
+            )}
+          </div>
           <select className="border rounded px-2 py-2" value={editing.status} onChange={(e) => setEditing({ ...editing, status: e.target.value })}>
             <option value="draft">草稿</option><option value="published">已发布</option>
           </select>
@@ -773,136 +917,295 @@ export function AdminLibraries() {
 // ---------------- Tag Pool ----------------
 export function AdminTagPool() {
   const db = useDB();
-  const [merging, setMerging] = useState<{ libKey: string; fieldKey: string } | null>(null);
-  const [mergeFrom, setMergeFrom] = useState<Set<string>>(new Set());
-  const [mergeTo, setMergeTo] = useState("");
-  const [filterByLog, setFilterByLog] = useState("");
+  const [tab, setTab] = useState<"pool" | "custom">("pool");
+  const [libKey, setLibKey] = useState(db.libraries[0]?.key || "");
+  const lib = db.libraries.find((l) => l.key === libKey);
+  const fields = (lib?.fields || []).filter((f) => f.type !== "text");
+  const [fieldKey, setFieldKey] = useState(fields[0]?.key || "");
+  const field = fields.find((f) => f.key === fieldKey) || fields[0];
 
-  const handle = (id: string, status: "approved" | "rejected") => {
+  const [newTag, setNewTag] = useState("");
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 12;
+  const [mergeFrom, setMergeFrom] = useState<Set<string>>(new Set());
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [mergeTo, setMergeTo] = useState("");
+
+  const usage = useMemo(() => {
+    const map: Record<string, number> = {};
+    db.annotations.forEach((a) => {
+      Object.entries(a.data).forEach(([fk, vs]) => {
+        const arr = Array.isArray(vs) ? vs : [vs];
+        arr.forEach((v) => { if (v) map[`${fk}::${v}`] = (map[`${fk}::${v}`] || 0) + 1; });
+      });
+    });
+    return map;
+  }, [db.annotations]);
+
+  if (!lib || !field) return <div className="p-6">无库</div>;
+
+  const filtered = field.options.filter((o) => o.toLowerCase().includes(search.toLowerCase()));
+  const sorted = [...filtered].sort((a, b) => (usage[`${field.key}::${b}`] || 0) - (usage[`${field.key}::${a}`] || 0));
+  const paged = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+
+  const addTag = () => {
+    const v = newTag.trim();
+    if (!v) return;
+    if (field.options.includes(v)) { toast.error("已存在"); return; }
+    const x = loadDB();
+    const li = x.libraries.findIndex((l) => l.key === libKey);
+    const fi = x.libraries[li].fields.findIndex((f) => f.key === fieldKey);
+    x.libraries[li].fields[fi].options.push(v);
+    saveDB(x);
+    log("tag_add", "admin", `${libKey}/${fieldKey}: +${v}`);
+    setNewTag("");
+    toast.success("已添加");
+  };
+
+  const editTag = (old: string) => {
+    const next = prompt("修改标签名", old);
+    if (!next || next === old) return;
+    if (field.options.includes(next)) { toast.error("名称重复"); return; }
+    const x = loadDB();
+    const li = x.libraries.findIndex((l) => l.key === libKey);
+    const fi = x.libraries[li].fields.findIndex((f) => f.key === fieldKey);
+    x.libraries[li].fields[fi].options = x.libraries[li].fields[fi].options.map((o) => o === old ? next : o);
+    x.annotations.forEach((a) => {
+      const cur = a.data[fieldKey];
+      if (Array.isArray(cur)) a.data[fieldKey] = cur.map((v) => v === old ? next : v);
+    });
+    saveDB(x);
+    log("tag_rename", "admin", `${libKey}/${fieldKey}: ${old} -> ${next}`);
+    toast.success("已修改");
+  };
+
+  const deleteTag = (val: string) => {
+    const used = usage[`${field.key}::${val}`] || 0;
+    if (used > 0) {
+      const choice = prompt(`「${val}」已被使用 ${used} 次。输入 "force" 强制删除（移除标注中该标签）；输入 "disable" 仅停用（保留历史，从选项移除）；其他取消。`);
+      if (choice !== "force" && choice !== "disable") return;
+      const x = loadDB();
+      const li = x.libraries.findIndex((l) => l.key === libKey);
+      const fi = x.libraries[li].fields.findIndex((f) => f.key === fieldKey);
+      x.libraries[li].fields[fi].options = x.libraries[li].fields[fi].options.filter((o) => o !== val);
+      if (choice === "force") {
+        x.annotations.forEach((a) => {
+          const cur = a.data[fieldKey];
+          if (Array.isArray(cur)) a.data[fieldKey] = cur.filter((v) => v !== val);
+        });
+      }
+      saveDB(x);
+      log(choice === "force" ? "tag_force_delete" : "tag_disable", "admin", `${libKey}/${fieldKey}: ${val}`);
+      toast.success("操作完成");
+    } else {
+      if (!confirm(`删除「${val}」？`)) return;
+      const x = loadDB();
+      const li = x.libraries.findIndex((l) => l.key === libKey);
+      const fi = x.libraries[li].fields.findIndex((f) => f.key === fieldKey);
+      x.libraries[li].fields[fi].options = x.libraries[li].fields[fi].options.filter((o) => o !== val);
+      saveDB(x);
+      log("tag_delete", "admin", `${libKey}/${fieldKey}: ${val}`);
+    }
+  };
+
+  const importTags = async (file: File, mode: "append" | "replace") => {
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows: any[] = XLSX.utils.sheet_to_json(ws, { header: 1 });
+      const tags = rows.flat().map((v) => String(v).trim()).filter(Boolean);
+      if (tags.length === 0) { toast.error("文件为空或解析失败：未读到任何标签"); return; }
+      const x = loadDB();
+      const li = x.libraries.findIndex((l) => l.key === libKey);
+      const fi = x.libraries[li].fields.findIndex((f) => f.key === fieldKey);
+      if (mode === "replace") x.libraries[li].fields[fi].options = Array.from(new Set(tags));
+      else {
+        const cur = new Set(x.libraries[li].fields[fi].options);
+        tags.forEach((t) => cur.add(t));
+        x.libraries[li].fields[fi].options = Array.from(cur);
+      }
+      saveDB(x);
+      log("tag_import", "admin", `${libKey}/${fieldKey}: ${mode} ${tags.length}`);
+      toast.success(`已${mode === "replace" ? "覆盖" : "追加"} ${tags.length} 个标签`);
+    } catch (e: any) { toast.error(`解析失败：${e.message}`); }
+  };
+
+  const exportTags = () => {
+    const data = field.options.map((o) => ({ tag: o, usage: usage[`${field.key}::${o}`] || 0 }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "tags");
+    const buf = XLSX.write(wb, { type: "array", bookType: "xlsx" });
+    saveAs(new Blob([buf]), `${libKey}_${fieldKey}_tags.xlsx`);
+  };
+
+  const doMerge = () => {
+    if (!mergeTo || mergeFrom.size === 0) return;
+    if (!confirm(`将 ${[...mergeFrom].join(", ")} 合并为「${mergeTo}」？标注数据会迁移。`)) return;
+    const x = loadDB();
+    const li = x.libraries.findIndex((l) => l.key === libKey);
+    const fi = x.libraries[li].fields.findIndex((f) => f.key === fieldKey);
+    const f = x.libraries[li].fields[fi];
+    if (!f.options.includes(mergeTo)) f.options.push(mergeTo);
+    f.options = f.options.filter((o) => !mergeFrom.has(o) || o === mergeTo);
+    x.annotations.forEach((a) => {
+      const cur = a.data[fieldKey];
+      if (Array.isArray(cur)) a.data[fieldKey] = Array.from(new Set(cur.map((v) => mergeFrom.has(v) ? mergeTo : v)));
+      a.history.forEach((h) => {
+        const hc = h.data?.[fieldKey];
+        if (Array.isArray(hc)) h.data![fieldKey] = Array.from(new Set(hc.map((v) => mergeFrom.has(v) ? mergeTo : v)));
+      });
+    });
+    saveDB(x);
+    log("tag_merge", "admin", `${libKey}/${fieldKey}: ${[...mergeFrom].join(",")} -> ${mergeTo}`);
+    toast.success("已合并");
+    setMergeOpen(false); setMergeFrom(new Set()); setMergeTo("");
+  };
+
+  // Custom tag review
+  const handleCustom = (id: string, status: "approved" | "rejected") => {
     const x = loadDB();
     const i = x.tagRequests.findIndex((t) => t.id === id);
     if (i < 0) return;
     x.tagRequests[i].status = status;
     if (status === "approved") {
       const r = x.tagRequests[i];
-      const lib = x.libraries.find((l) => l.key === r.libraryKey);
-      const f = lib?.fields.find((f) => f.key === r.fieldKey);
+      const lb = x.libraries.find((l) => l.key === r.libraryKey);
+      const f = lb?.fields.find((f) => f.key === r.fieldKey);
       if (f && !f.options.includes(r.value)) f.options.push(r.value);
     }
     saveDB(x);
-  };
-
-  // Tag usage stats
-  const usage = useMemo(() => {
-    const map: Record<string, number> = {};
-    db.annotations.forEach((a) => {
-      Object.entries(a.data).forEach(([fk, vs]) => {
-        const arr = Array.isArray(vs) ? vs : [vs];
-        arr.forEach((v) => {
-          if (!v) return;
-          const k = `${fk}::${v}`;
-          map[k] = (map[k] || 0) + 1;
-        });
-      });
-    });
-    return map;
-  }, [db.annotations]);
-
-  const doMerge = () => {
-    if (!merging || !mergeTo || mergeFrom.size === 0) return;
-    if (!confirm(`将 ${[...mergeFrom].join(", ")} 合并为「${mergeTo}」？标注数据会迁移。`)) return;
-    const x = loadDB();
-    const lib = x.libraries.find((l) => l.key === merging.libKey)!;
-    const f = lib.fields.find((ff) => ff.key === merging.fieldKey)!;
-    if (!f.options.includes(mergeTo)) f.options.push(mergeTo);
-    f.options = f.options.filter((o) => !mergeFrom.has(o) || o === mergeTo);
-    x.annotations.forEach((a) => {
-      const cur = a.data[f.key];
-      if (Array.isArray(cur)) {
-        a.data[f.key] = Array.from(new Set(cur.map((v) => mergeFrom.has(v) ? mergeTo : v)));
-      }
-    });
-    saveDB(x);
-    log("merge_tags", "admin", `${merging.libKey}/${f.key}: ${[...mergeFrom].join(",")} -> ${mergeTo}`);
-    toast.success("已合并");
-    setMerging(null); setMergeFrom(new Set()); setMergeTo("");
+    log(`custom_tag_${status}`, "admin", `${x.tagRequests[i].libraryKey}/${x.tagRequests[i].fieldKey}: ${x.tagRequests[i].value}`);
   };
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-4">
+    <div className="p-6 max-w-6xl mx-auto space-y-4">
       <h1 className="text-2xl font-bold">标签池管理</h1>
+      <div className="flex gap-2 border-b">
+        <button onClick={() => setTab("pool")} className={`px-4 py-2 text-sm ${tab === "pool" ? "border-b-2 border-primary font-semibold" : ""}`}>固定标签池</button>
+        <button onClick={() => setTab("custom")} className={`px-4 py-2 text-sm ${tab === "custom" ? "border-b-2 border-primary font-semibold" : ""}`}>
+          自定义标签审核 ({db.tagRequests.filter((r) => r.status === "pending").length})
+        </button>
+      </div>
 
-      <Card className="p-4">
-        <h3 className="font-semibold mb-2">自定义标签申请</h3>
-        {db.tagRequests.length === 0 && <div className="text-muted-foreground text-sm">暂无</div>}
-        {db.tagRequests.map((r) => (
-          <div key={r.id} className="flex items-center justify-between border-t py-2">
-            <div className="text-sm">{r.libraryKey} / {r.fieldKey}：<b>{r.value}</b> <span className="text-xs text-muted-foreground">[{r.status}]</span></div>
-            {r.status === "pending" && (
-              <div className="flex gap-2">
-                <Button size="sm" onClick={() => handle(r.id, "approved")}>批准</Button>
-                <Button size="sm" variant="outline" onClick={() => handle(r.id, "rejected")}>拒绝</Button>
+      {tab === "pool" && (
+        <>
+          <Card className="p-4 space-y-3">
+            <div className="flex gap-2 items-center flex-wrap">
+              <select className="border rounded px-2 py-1.5 text-sm" value={libKey} onChange={(e) => { setLibKey(e.target.value); setPage(0); }}>
+                {db.libraries.map((l) => <option key={l.key} value={l.key}>{l.name}</option>)}
+              </select>
+              <select className="border rounded px-2 py-1.5 text-sm" value={fieldKey} onChange={(e) => { setFieldKey(e.target.value); setPage(0); }}>
+                {fields.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+              </select>
+              <Input placeholder="搜索标签…" value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} className="w-48 h-8" />
+              <div className="flex-1" />
+              <Button size="sm" variant="outline" onClick={exportTags}>导出 Excel</Button>
+              <label className="text-xs border rounded px-2 py-1.5 cursor-pointer hover:bg-muted">
+                追加导入<input type="file" accept=".csv,.xlsx" className="hidden" onChange={(e) => e.target.files?.[0] && importTags(e.target.files[0], "append")} />
+              </label>
+              <label className="text-xs border rounded px-2 py-1.5 cursor-pointer hover:bg-muted">
+                覆盖导入<input type="file" accept=".csv,.xlsx" className="hidden" onChange={(e) => e.target.files?.[0] && importTags(e.target.files[0], "replace")} />
+              </label>
+              <Button size="sm" variant="outline" disabled={mergeFrom.size < 2} onClick={() => setMergeOpen(true)}>合并 ({mergeFrom.size})</Button>
+            </div>
+            <div className="flex gap-2">
+              <Input placeholder="新增标签名" value={newTag} onChange={(e) => setNewTag(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addTag()} className="h-8" />
+              <Button size="sm" onClick={addTag}>新增</Button>
+            </div>
+
+            <table className="w-full text-sm">
+              <thead className="text-left text-xs text-muted-foreground border-b">
+                <tr>
+                  <th className="py-1 w-8"></th>
+                  <th>标签</th>
+                  <th>使用次数</th>
+                  <th className="text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paged.map((o) => (
+                  <tr key={o} className="border-b">
+                    <td><input type="checkbox" checked={mergeFrom.has(o)} onChange={(e) => {
+                      const s = new Set(mergeFrom);
+                      if (e.target.checked) s.add(o); else s.delete(o);
+                      setMergeFrom(s);
+                    }} /></td>
+                    <td className="py-1.5">{o}</td>
+                    <td>{usage[`${field.key}::${o}`] || 0}</td>
+                    <td className="text-right">
+                      <Button size="sm" variant="ghost" className="h-7" onClick={() => editTag(o)}>编辑</Button>
+                      <Button size="sm" variant="ghost" className="h-7 text-destructive" onClick={() => deleteTag(o)}>删除</Button>
+                    </td>
+                  </tr>
+                ))}
+                {paged.length === 0 && <tr><td colSpan={4} className="text-center text-muted-foreground py-4">暂无</td></tr>}
+              </tbody>
+            </table>
+            <div className="flex justify-between items-center text-xs">
+              <span>共 {sorted.length} 个</span>
+              <div className="flex gap-2 items-center">
+                <Button size="sm" variant="outline" disabled={page === 0} onClick={() => setPage(page - 1)}>上一页</Button>
+                <span>{page + 1} / {totalPages}</span>
+                <Button size="sm" variant="outline" disabled={page + 1 >= totalPages} onClick={() => setPage(page + 1)}>下一页</Button>
               </div>
-            )}
-          </div>
-        ))}
-      </Card>
+            </div>
+          </Card>
 
-      <Card className="p-4">
-        <h3 className="font-semibold mb-2">固定选项 + 使用统计 + 合并</h3>
-        {db.libraries.map((lib) => (
-          <div key={lib.key} className="border-t pt-2 mt-2">
-            <div className="font-medium text-sm mb-1">{lib.name}</div>
-            {lib.fields.filter(f => f.type !== "text").map((f) => (
-              <div key={f.key} className="ml-2 mb-2">
-                <div className="text-xs text-muted-foreground flex items-center gap-2">
-                  <span>{f.label} ({f.key})</span>
-                  <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => { setMerging({ libKey: lib.key, fieldKey: f.key }); setMergeFrom(new Set()); setMergeTo(""); }}>合并选项</Button>
-                </div>
-                <div className="flex flex-wrap gap-1 mt-1">
-                  {f.options.map((o) => (
-                    <span key={o} className="text-xs px-2 py-0.5 bg-muted rounded">
-                      {o} <span className="text-muted-foreground">({usage[`${f.key}::${o}`] || 0})</span>
-                    </span>
-                  ))}
-                </div>
+          <Dialog open={mergeOpen} onOpenChange={setMergeOpen}>
+            <DialogContent>
+              <DialogHeader><DialogTitle>合并标签</DialogTitle></DialogHeader>
+              <div className="text-sm space-y-2">
+                <div>源标签：{[...mergeFrom].join(", ")}</div>
+                <div>合并为：</div>
+                <Input value={mergeTo} onChange={(e) => setMergeTo(e.target.value)} placeholder="目标标签名" />
               </div>
-            ))}
-          </div>
-        ))}
-      </Card>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setMergeOpen(false)}>取消</Button>
+                <Button onClick={doMerge}>确认合并</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </>
+      )}
 
-      <Dialog open={!!merging} onOpenChange={(o) => !o && setMerging(null)}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>合并标签</DialogTitle></DialogHeader>
-          {merging && (() => {
-            const lib = db.libraries.find(l => l.key === merging.libKey)!;
-            const f = lib.fields.find(ff => ff.key === merging.fieldKey)!;
+      {tab === "custom" && (
+        <Card className="p-4 space-y-2">
+          {db.tagRequests.length === 0 && <div className="text-muted-foreground text-sm">暂无</div>}
+          {db.libraries.map((lb) => {
+            const reqs = db.tagRequests.filter((r) => r.libraryKey === lb.key);
+            if (reqs.length === 0) return null;
             return (
-              <div className="space-y-2 text-sm">
-                <div>选择源标签（多选）：</div>
-                <div className="flex flex-wrap gap-2">
-                  {f.options.map((o) => (
-                    <label key={o} className="flex items-center gap-1 text-xs border rounded px-2 py-1">
-                      <input type="checkbox" checked={mergeFrom.has(o)} onChange={(e) => {
-                        const s = new Set(mergeFrom);
-                        if (e.target.checked) s.add(o); else s.delete(o);
-                        setMergeFrom(s);
-                      }} />{o}
-                    </label>
-                  ))}
-                </div>
-                <div>合并为目标标签：</div>
-                <Input value={mergeTo} onChange={(e) => setMergeTo(e.target.value)} placeholder="新标签名（可与源标签重名）" />
+              <div key={lb.key} className="border-t pt-2">
+                <div className="font-medium text-sm">{lb.name}</div>
+                {lb.fields.map((f) => {
+                  const fr = reqs.filter((r) => r.fieldKey === f.key);
+                  if (fr.length === 0) return null;
+                  return (
+                    <div key={f.key} className="ml-2 mt-1">
+                      <div className="text-xs text-muted-foreground">{f.label}</div>
+                      {fr.map((r) => (
+                        <div key={r.id} className="flex items-center justify-between border-b py-1.5 text-sm">
+                          <span><b>{r.value}</b> <span className="text-xs text-muted-foreground">by {r.byPid} · [{r.status}]</span></span>
+                          {r.status === "pending" && (
+                            <div className="flex gap-2">
+                              <Button size="sm" onClick={() => handleCustom(r.id, "approved")}>批准</Button>
+                              <Button size="sm" variant="outline" onClick={() => handleCustom(r.id, "rejected")}>拒绝</Button>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
               </div>
             );
-          })()}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setMerging(null)}>取消</Button>
-            <Button onClick={doMerge}>确认合并</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          })}
+        </Card>
+      )}
     </div>
   );
 }
@@ -912,18 +1215,34 @@ export function AdminLogs() {
   const db = useDB();
   const [filterAction, setFilterAction] = useState("");
   const [filterPid, setFilterPid] = useState("");
-  const filtered = db.logs.filter((l) =>
-    (!filterAction || l.action.includes(filterAction)) && (!filterPid || l.pid.includes(filterPid))
-  );
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [page, setPage] = useState(0);
+  const PAGE = 30;
+  const actions = useMemo(() => Array.from(new Set(db.logs.map((l) => l.action))), [db.logs]);
+  const filtered = db.logs.filter((l) => {
+    if (filterAction && l.action !== filterAction) return false;
+    if (filterPid && !l.pid.includes(filterPid)) return false;
+    if (fromDate && l.ts < new Date(fromDate).getTime()) return false;
+    if (toDate && l.ts > new Date(toDate).getTime() + 86400000) return false;
+    return true;
+  });
+  const paged = filtered.slice(page * PAGE, (page + 1) * PAGE);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE));
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <h1 className="text-2xl font-bold mb-3">操作日志</h1>
-      <div className="flex gap-2 mb-3">
-        <Input placeholder="按操作类型过滤" value={filterAction} onChange={(e) => setFilterAction(e.target.value)} className="w-48" />
-        <Input placeholder="按 PID 过滤" value={filterPid} onChange={(e) => setFilterPid(e.target.value)} className="w-48" />
+      <div className="flex gap-2 mb-3 flex-wrap">
+        <select className="border rounded px-2 py-1.5 text-sm" value={filterAction} onChange={(e) => { setFilterAction(e.target.value); setPage(0); }}>
+          <option value="">所有操作类型</option>
+          {actions.map((a) => <option key={a} value={a}>{a}</option>)}
+        </select>
+        <Input placeholder="按 PID 过滤" value={filterPid} onChange={(e) => { setFilterPid(e.target.value); setPage(0); }} className="w-40" />
+        <Input type="date" value={fromDate} onChange={(e) => { setFromDate(e.target.value); setPage(0); }} className="w-40" />
+        <Input type="date" value={toDate} onChange={(e) => { setToDate(e.target.value); setPage(0); }} className="w-40" />
       </div>
-      <Card className="p-4 max-h-[70vh] overflow-auto">
-        {filtered.map((l) => (
+      <Card className="p-4 max-h-[60vh] overflow-auto">
+        {paged.map((l) => (
           <div key={l.id} className="border-b py-1 text-xs flex gap-3">
             <span className="text-muted-foreground">{new Date(l.ts).toLocaleString()}</span>
             <span className="font-medium">{l.pid}</span>
@@ -931,8 +1250,16 @@ export function AdminLogs() {
             <span className="text-muted-foreground">{l.detail}</span>
           </div>
         ))}
-        {filtered.length === 0 && <div className="text-sm text-muted-foreground">暂无日志</div>}
+        {paged.length === 0 && <div className="text-sm text-muted-foreground">暂无日志</div>}
       </Card>
+      <div className="flex justify-between items-center text-xs mt-2">
+        <span>共 {filtered.length} 条</span>
+        <div className="flex gap-2 items-center">
+          <Button size="sm" variant="outline" disabled={page === 0} onClick={() => setPage(page - 1)}>上一页</Button>
+          <span>{page + 1} / {totalPages}</span>
+          <Button size="sm" variant="outline" disabled={page + 1 >= totalPages} onClick={() => setPage(page + 1)}>下一页</Button>
+        </div>
+      </div>
     </div>
   );
 }
