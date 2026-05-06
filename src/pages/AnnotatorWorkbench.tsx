@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useDB } from "@/lib/useDB";
 import { useAuth } from "@/lib/auth";
 import {
@@ -20,7 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Lock, Pencil, X, ZoomIn, RotateCw, ChevronLeft, ChevronRight, Plus, HelpCircle, BookOpen, Sparkles, ChevronsRight } from "lucide-react";
+import { Lock, Pencil, X, Plus, HelpCircle, BookOpen, Sparkles, History, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
 interface DraftMap {
@@ -31,10 +31,7 @@ interface DraftMap {
     dirty?: boolean;
   };
 }
-
-function emptyDraft() {
-  return { data: {}, craftPartGroups: [], customTags: [], dirty: false };
-}
+const emptyDraft = () => ({ data: {}, craftPartGroups: [], customTags: [], dirty: false });
 
 const STATUSES: { key: AnnoStatus | "all"; label: string }[] = [
   { key: "all", label: "全部" },
@@ -49,7 +46,6 @@ export default function AnnotatorWorkbench() {
   const { taskId } = useParams();
   const db = useDB();
   const { user } = useAuth();
-  const [params, setParams] = useSearchParams();
 
   const task = db.tasks.find((t) => t.id === taskId);
   const dataset = db.datasets.find((d) => d.id === task?.datasetId);
@@ -57,13 +53,18 @@ export default function AnnotatorWorkbench() {
   const myAssignment = task?.annotators.find((a) => a.userPid === user?.pid);
   const editablePerspectives = myAssignment?.perspectives || [];
 
-  const filterStatus = (params.get("status") as AnnoStatus | "all") || "not_started";
+  const [filterStatus, setFilterStatus] = useState<AnnoStatus | "all">("all");
+  const [search, setSearch] = useState("");
+  const [selectedStyles, setSelectedStyles] = useState<Set<string>>(new Set());
+  const [activeStyleId, setActiveStyleId] = useState<string | null>(null);
+  const [imgIdx, setImgIdx] = useState(0);
+  const [drafts, setDrafts] = useState<DraftMap>({});
+  const [showRules, setShowRules] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState<Perspective | null>(null);
 
-  // Compute image-level "rollup" status for filter (worst of editable perspectives)
-  const imageStatus = (imgId: string): AnnoStatus => {
+  const styleStatus = (sId: string): AnnoStatus => {
     if (!task) return "not_started";
-    const myPersps = editablePerspectives;
-    const annos = myPersps.map((p) => db.annotations.find((a) => a.taskId === task.id && a.imageId === imgId && a.perspective === p));
+    const annos = editablePerspectives.map((p) => db.annotations.find((a) => a.taskId === task.id && a.styleId === sId && a.perspective === p));
     if (annos.every((a) => !a)) return "not_started";
     if (annos.some((a) => a?.status === "rejected")) return "rejected";
     if (annos.some((a) => a?.status === "submitted")) return "submitted";
@@ -72,38 +73,37 @@ export default function AnnotatorWorkbench() {
     return "not_started";
   };
 
-  const filteredImages = useMemo(() => {
+  const styles = useMemo(() => {
     if (!dataset) return [];
-    if (filterStatus === "all") return dataset.images;
-    return dataset.images.filter((i) => imageStatus(i.id) === filterStatus);
-  }, [dataset, filterStatus, db.annotations, editablePerspectives.join(",")]);
+    return dataset.styles.filter((s) => {
+      if (search && !s.styleId.toLowerCase().includes(search.toLowerCase())) return false;
+      if (filterStatus !== "all" && styleStatus(s.id) !== filterStatus) return false;
+      return true;
+    });
+  }, [dataset, search, filterStatus, db.annotations]);
 
-  const [imgIdx, setImgIdx] = useState(0);
-  useEffect(() => { setImgIdx(0); }, [filterStatus]);
-  const image = filteredImages[imgIdx];
-
-  const [zoom, setZoom] = useState(1);
-  const [rot, setRot] = useState(0);
-  const [drafts, setDrafts] = useState<DraftMap>({});
-  const [showRulesModal, setShowRulesModal] = useState(false);
-  const [showBatch, setShowBatch] = useState(false);
-  const [panelOpen, setPanelOpen] = useState(true);
-
-  // Load existing data when image changes
+  // Default selected style
   useEffect(() => {
-    if (!image || !task) return;
+    if (!activeStyleId && styles.length > 0) setActiveStyleId(styles[0].id);
+    if (activeStyleId && !styles.find((s) => s.id === activeStyleId) && styles.length > 0) setActiveStyleId(styles[0].id);
+  }, [styles, activeStyleId]);
+
+  const activeStyle = dataset?.styles.find((s) => s.id === activeStyleId);
+
+  // Load drafts when style changes
+  useEffect(() => {
+    if (!activeStyle || !task) return;
     const next: DraftMap = {};
     PERSPECTIVES.forEach((p) => {
-      const a = getAnnotation(task.id, image.id, p);
-      const preselect = image.preselect?.[p];
+      const a = getAnnotation(task.id, activeStyle.id, p);
+      const preselect = activeStyle.preselect?.[p];
       next[p] = a
         ? { data: a.data as Record<string, string[]>, craftPartGroups: a.craftPartGroups || [], customTags: a.customTags, dirty: false }
         : { data: preselect ? { ...preselect } : {}, craftPartGroups: [], customTags: [], dirty: !!preselect };
     });
     setDrafts(next);
-    setZoom(1);
-    setRot(0);
-  }, [image?.id, task?.id]);
+    setImgIdx(0);
+  }, [activeStyle?.id, task?.id]);
 
   const validate = (): string | null => {
     if (!library) return null;
@@ -120,7 +120,7 @@ export default function AnnotatorWorkbench() {
   };
 
   const saveAll = (status: "drafted" | "submitted", silent = false) => {
-    if (!task || !image || !user) return;
+    if (!task || !activeStyle || !user) return;
     if (status === "submitted") {
       const err = validate();
       if (err) { toast.error(err); return; }
@@ -133,40 +133,41 @@ export default function AnnotatorWorkbench() {
       const isEmpty = Object.keys(draft.data).length === 0 && draft.craftPartGroups.length === 0 && draft.customTags.length === 0;
       if (status === "submitted" && isEmpty) return;
       if (status === "drafted" && isEmpty && !draft.dirty) return;
-      const existing = getAnnotation(task.id, image.id, p);
-      // Don't overwrite already-submitted/approved with autosave drafted
+      const existing = getAnnotation(task.id, activeStyle.id, p);
       if (silent && existing && ["submitted", "approved"].includes(existing.status)) return;
       const a: Annotation = {
         id: existing?.id || uid(),
         taskId: task.id,
-        imageId: image.id,
+        styleId: activeStyle.id,
         perspective: p,
         status,
         data: draft.data,
         craftPartGroups: draft.craftPartGroups,
         customTags: draft.customTags,
         annotatorPid: user.pid,
-        history: [...(existing?.history || []), { ts: Date.now(), status, by: user.pid }],
+        reviewerNotes: existing?.reviewerNotes || [],
+        history: [...(existing?.history || []), {
+          ts: Date.now(), status, by: user.pid,
+          data: draft.data, craftPartGroups: draft.craftPartGroups, customTags: draft.customTags,
+        }],
         updatedAt: Date.now(),
       };
       upsertAnnotation(a);
       count++;
     });
     if (count > 0) {
-      log(status === "submitted" ? "submit_annotation" : "save_draft", user.pid, `task=${task.id} img=${image.id} n=${count}`);
+      log(status === "submitted" ? "submit_annotation" : "save_draft", user.pid, `task=${task.id} style=${activeStyle.styleId} n=${count}`);
       if (!silent) toast.success(status === "submitted" ? `已提交 ${count} 个视角` : `已保存草稿 ${count} 个视角`);
     }
   };
 
-  // Auto-save every 30s
   const draftsRef = useRef(drafts);
   draftsRef.current = drafts;
   useEffect(() => {
     const t = setInterval(() => saveAll("drafted", true), 30000);
     return () => clearInterval(t);
-  }, [image?.id, task?.id]);
+  }, [activeStyle?.id, task?.id]);
 
-  // Keyboard
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.key === "s") { e.preventDefault(); saveAll("drafted"); }
@@ -195,29 +196,44 @@ export default function AnnotatorWorkbench() {
         return next;
       });
     });
-    toast.success("AI 预标注完成（mock），请人工审核调整");
+    toast.success("AI 预标注完成（mock）");
   };
 
   const batchSubmit = () => {
-    if (!task) return;
-    const targets = filteredImages.filter((img) => imageStatus(img.id) === "drafted");
+    if (selectedStyles.size === 0) { toast.error("未选中款式"); return; }
     let total = 0;
-    targets.forEach((img) => {
+    selectedStyles.forEach((sid) => {
       PERSPECTIVES.forEach((p) => {
         if (!editablePerspectives.includes(p)) return;
-        const ex = getAnnotation(task.id, img.id, p);
+        const ex = getAnnotation(task.id, sid, p);
         if (ex && ex.status === "drafted") {
           ex.status = "submitted";
-          ex.history.push({ ts: Date.now(), status: "submitted", by: user.pid });
+          ex.history.push({ ts: Date.now(), status: "submitted", by: user.pid, data: ex.data, craftPartGroups: ex.craftPartGroups, customTags: ex.customTags });
           ex.updatedAt = Date.now();
           upsertAnnotation(ex);
           total++;
         }
       });
     });
-    log("batch_submit", user.pid, `task=${task.id} n=${total}`);
+    log("batch_submit", user.pid, `task=${task.id} styles=${selectedStyles.size} versions=${total}`);
     toast.success(`批量提交 ${total} 个视角`);
-    setShowBatch(false);
+    setSelectedStyles(new Set());
+  };
+
+  const restoreVersion = (p: Perspective, ver: any) => {
+    if (!confirm("确认恢复此版本至草稿？当前未保存改动会丢失。")) return;
+    setDrafts((prev) => ({
+      ...prev,
+      [p]: {
+        data: ver.data || {},
+        craftPartGroups: ver.craftPartGroups || [],
+        customTags: ver.customTags || [],
+        dirty: true,
+      },
+    }));
+    log("restore_version", user.pid, `style=${activeStyle?.styleId} persp=${p} ts=${ver.ts}`);
+    toast.success("已恢复，请保存草稿");
+    setHistoryOpen(null);
   };
 
   const isComment = library.key === "comment";
@@ -227,192 +243,229 @@ export default function AnnotatorWorkbench() {
       <div className="border-b px-4 py-2 flex items-center gap-3 bg-card flex-wrap">
         <Link to="/annotator" className="text-sm text-primary">← 返回</Link>
         <div className="font-semibold">{task.name}</div>
-        <div className="flex gap-1 ml-2">
-          {STATUSES.map((s) => (
-            <button
-              key={s.key}
-              onClick={() => setParams({ status: s.key })}
-              className={`text-xs px-2 py-1 rounded ${filterStatus === s.key ? "bg-primary text-primary-foreground" : "bg-muted hover:bg-muted/70"}`}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
-        <div className="text-sm text-muted-foreground">第 {filteredImages.length === 0 ? 0 : imgIdx + 1} / {filteredImages.length} 张</div>
         <div className="ml-auto text-xs text-muted-foreground">Ctrl+S 草稿 · Ctrl+Enter 提交 · 30s 自动保存</div>
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* image */}
-        <div className="w-[380px] border-r bg-muted/30 flex flex-col">
-          <div className="flex-1 overflow-auto flex items-center justify-center p-4">
-            {!image ? (
-              <div className="text-muted-foreground text-sm">无符合筛选的图片</div>
-            ) : isComment ? (
-              <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground text-sm">
-                <div className="border-2 border-dashed rounded p-6 text-center">
-                  <div className="mb-2">无图片（评语库）</div>
-                  <textarea
-                    placeholder="客户评语文本…"
-                    className="border rounded p-2 text-sm w-72 h-32 bg-background text-foreground"
-                  />
-                </div>
+        {/* Left: style list 320px */}
+        <div className="w-[320px] border-r bg-card flex flex-col">
+          <div className="p-2 border-b space-y-2">
+            <Input placeholder="搜索款式ID…" value={search} onChange={(e) => setSearch(e.target.value)} className="h-8" />
+            <div className="flex flex-wrap gap-1">
+              {STATUSES.map((s) => (
+                <button key={s.key} onClick={() => setFilterStatus(s.key)}
+                  className={`text-xs px-2 py-0.5 rounded ${filterStatus === s.key ? "bg-primary text-primary-foreground" : "bg-muted hover:bg-muted/70"}`}>
+                  {s.label}
+                </button>
+              ))}
+            </div>
+            {selectedStyles.size > 0 && (
+              <div className="flex gap-1 items-center">
+                <span className="text-xs">已选 {selectedStyles.size}</span>
+                <Button size="sm" className="h-6 text-xs" onClick={batchSubmit}>批量提交</Button>
+                <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => setSelectedStyles(new Set())}>清空</Button>
               </div>
-            ) : (
-              <img
-                src={image.url}
-                alt={image.filename}
-                style={{ transform: `scale(${zoom}) rotate(${rot}deg)`, transition: "transform .2s" }}
-                className="max-w-full max-h-full object-contain"
-              />
             )}
           </div>
-          <div className="p-2 border-t bg-card flex items-center gap-1 justify-center flex-wrap">
-            <Button size="icon" variant="outline" onClick={() => setZoom((z) => Math.max(0.5, z - 0.1))}><ZoomIn className="rotate-180" /></Button>
-            <Button size="icon" variant="outline" onClick={() => setZoom((z) => Math.min(3, z + 0.1))}><ZoomIn /></Button>
-            <Button size="icon" variant="outline" onClick={() => setRot((r) => r + 90)}><RotateCw /></Button>
-            <Button size="icon" variant="outline" disabled={imgIdx === 0} onClick={() => setImgIdx((i) => i - 1)}><ChevronLeft /></Button>
-            <Button size="icon" variant="outline" disabled={imgIdx >= filteredImages.length - 1} onClick={() => setImgIdx((i) => i + 1)}><ChevronRight /></Button>
+          <div className="flex-1 overflow-auto">
+            {styles.map((s) => {
+              const st = styleStatus(s.id);
+              const tagSummary: string[] = [];
+              editablePerspectives.forEach((p) => {
+                const a = db.annotations.find((x) => x.taskId === task.id && x.styleId === s.id && x.perspective === p);
+                if (a) Object.values(a.data).forEach((v) => (Array.isArray(v) ? v : [v]).forEach((vv) => vv && tagSummary.push(vv as string)));
+              });
+              return (
+                <div key={s.id}
+                  onClick={() => setActiveStyleId(s.id)}
+                  className={`p-2 border-b cursor-pointer flex gap-2 ${activeStyleId === s.id ? "bg-primary/10 border-l-4 border-l-primary" : "hover:bg-muted/50"}`}>
+                  <input type="checkbox" className="mt-1" checked={selectedStyles.has(s.id)} onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => {
+                      const set = new Set(selectedStyles);
+                      if (e.target.checked) set.add(s.id); else set.delete(s.id);
+                      setSelectedStyles(set);
+                    }} />
+                  {s.images[0] ? <img src={s.images[0].url} className="w-12 h-12 object-cover rounded" alt="" /> : <div className="w-12 h-12 bg-muted rounded" />}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-medium truncate">{s.styleId}</div>
+                    <div className="text-[10px] text-muted-foreground">{s.images.length} 图 · <StatusBadge s={st} /></div>
+                    <div className="text-[10px] truncate text-muted-foreground">{[...new Set(tagSummary)].slice(0, 3).join(" · ") || "无标签"}</div>
+                  </div>
+                </div>
+              );
+            })}
+            {styles.length === 0 && <div className="text-sm text-muted-foreground p-4">无符合的款式</div>}
           </div>
         </div>
 
-        {/* perspectives */}
-        <div className="flex-1 overflow-auto p-4 space-y-4">
-          {!image && <div className="text-muted-foreground text-sm">该筛选下没有图片</div>}
-          {image && PERSPECTIVES.map((p) => {
-            const editable = editablePerspectives.includes(p);
-            const draft = drafts[p] || emptyDraft();
-            return (
-              <Card key={p} className={`p-4 ${editable ? "border-primary/30" : "bg-muted/40"}`}>
-                <div className="flex items-center gap-2 mb-3">
-                  {editable ? <Pencil className="w-4 h-4 text-primary" /> : <Lock className="w-4 h-4 text-muted-foreground" />}
-                  <h3 className="font-semibold">{PERSPECTIVE_LABEL[p]}</h3>
-                  <span className={`text-xs px-2 py-0.5 rounded ${editable ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>
-                    {editable ? "可编辑" : "只读"}
-                  </span>
+        {/* Right: workspace */}
+        <div className="flex-1 overflow-auto">
+          {!activeStyle ? (
+            <div className="p-6 text-muted-foreground">请从左侧选择一个款式</div>
+          ) : (
+            <div className="p-4 space-y-4">
+              {/* style header + image switcher */}
+              <Card className="p-3">
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="font-bold text-lg">{activeStyle.styleId}</div>
+                  <span className="text-xs text-muted-foreground">{activeStyle.images.length} 张图片</span>
                 </div>
-                <PerspectiveForm
-                  library={library}
-                  draft={draft}
-                  editable={editable}
-                  onChange={(fn) => updateDraft(p, fn)}
-                />
-              </Card>
-            );
-          })}
-        </div>
-
-        {/* right panel */}
-        {panelOpen && image && (
-          <div className="w-72 border-l bg-card overflow-auto p-3 space-y-3 text-sm">
-            <Button size="sm" variant="ghost" className="w-full justify-start" onClick={() => setPanelOpen(false)}><ChevronsRight className="w-3 h-3" />收起面板</Button>
-            <Button size="sm" variant="outline" className="w-full" onClick={() => setShowRulesModal(true)}>
-              <BookOpen className="w-3 h-3" /> 标注规范
-            </Button>
-            <div>
-              <div className="font-medium mb-1">参考图库</div>
-              <div className="grid grid-cols-2 gap-2">
-                {dataset.images.filter((i) => i.id !== image.id).slice(0, 4).map((i) => (
-                  <img key={i.id} src={i.url} className="w-full h-20 object-cover rounded cursor-zoom-in" onClick={() => window.open(i.url, "_blank")} alt="" />
-                ))}
-              </div>
-            </div>
-            <div>
-              <div className="font-medium mb-1">本图自定义标签</div>
-              <div className="flex flex-wrap gap-1">
-                {Object.values(drafts).flatMap((d) => d?.customTags || []).map((t, i) => (
-                  <span key={i} className="text-xs px-2 py-0.5 rounded bg-accent/30">{t}</span>
-                ))}
-              </div>
-            </div>
-            {library.craftPart && (
-              <div>
-                <div className="font-medium mb-1">工艺-部位参考表</div>
-                <div className="text-xs space-y-0.5 text-muted-foreground">
-                  {Object.entries(library.craftPart.rules).map(([c, ps]) => (
-                    <div key={c}><b className="text-foreground">{c}</b>: {ps.join(", ")}</div>
-                  ))}
-                </div>
-              </div>
-            )}
-            <div>
-              <div className="font-medium mb-1">历史记录</div>
-              <div className="text-xs space-y-1 max-h-40 overflow-auto">
-                {PERSPECTIVES.flatMap((p) => {
-                  const a = getAnnotation(task.id, image.id, p);
-                  if (!a) return [];
-                  return a.history.slice(-3).map((h, i) => (
-                    <div key={`${p}-${i}`} className="border-l-2 pl-2 border-muted">
-                      <span className="text-muted-foreground">{new Date(h.ts).toLocaleString()}</span>
-                      <span className="ml-1">{PERSPECTIVE_LABEL[p].slice(0, 4)} · {h.status}</span>
+                {isComment ? (
+                  <textarea placeholder="客户评语文本…" className="border rounded p-2 text-sm w-full h-24 bg-background" />
+                ) : activeStyle.images.length > 0 ? (
+                  <div className="flex gap-3">
+                    <img src={activeStyle.images[imgIdx]?.url} alt="" className="w-72 h-72 object-contain bg-muted rounded" />
+                    <div className="flex flex-col gap-1 overflow-auto max-h-72">
+                      {activeStyle.images.map((im, i) => (
+                        <button key={i} onClick={() => setImgIdx(i)}
+                          className={`border rounded p-1 ${imgIdx === i ? "border-primary ring-2 ring-primary/30" : ""}`}>
+                          <img src={im.url} className="w-16 h-16 object-cover rounded" alt="" />
+                          <div className="text-[10px] mt-0.5 text-center">{im.angle || `图${i + 1}`}</div>
+                        </button>
+                      ))}
                     </div>
-                  ));
-                })}
-              </div>
+                  </div>
+                ) : (
+                  <div className="text-muted-foreground text-sm">该款式暂无图片</div>
+                )}
+              </Card>
+
+              {/* perspectives */}
+              {PERSPECTIVES.map((p) => {
+                const editable = editablePerspectives.includes(p);
+                const draft = drafts[p] || emptyDraft();
+                const existing = getAnnotation(task.id, activeStyle.id, p);
+                return (
+                  <Card key={p} className={`p-4 ${editable ? "border-primary/30" : "bg-muted/40"}`}>
+                    <div className="flex items-center gap-2 mb-3">
+                      {editable ? <Pencil className="w-4 h-4 text-primary" /> : <Lock className="w-4 h-4 text-muted-foreground" />}
+                      <h3 className="font-semibold">{PERSPECTIVE_LABEL[p]}</h3>
+                      {existing && <StatusBadge s={existing.status} />}
+                      <Button size="sm" variant="ghost" className="ml-auto h-7 text-xs" onClick={() => setHistoryOpen(p)}>
+                        <History className="w-3 h-3" /> 历史版本 ({existing?.history.length || 0})
+                      </Button>
+                    </div>
+                    {existing?.rejectReason && (
+                      <div className="text-xs text-destructive bg-destructive/10 p-2 rounded mb-2">打回原因：{existing.rejectReason}</div>
+                    )}
+                    <PerspectiveForm library={library} draft={draft} editable={editable} onChange={(fn) => updateDraft(p, fn)} />
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Right helper panel */}
+        <div className="w-64 border-l bg-card overflow-auto p-3 space-y-3 text-sm">
+          <Button size="sm" variant="outline" className="w-full" onClick={() => setShowRules(true)}>
+            <BookOpen className="w-3 h-3" /> 标注规范
+          </Button>
+          <div>
+            <div className="font-medium mb-1">参考图库</div>
+            <div className="grid grid-cols-2 gap-1">
+              {dataset.styles.filter((s) => s.id !== activeStyle?.id).slice(0, 4).flatMap((s) => s.images.slice(0, 1)).map((im, i) => (
+                <img key={i} src={im.url} className="w-full h-16 object-cover rounded cursor-zoom-in" onClick={() => window.open(im.url, "_blank")} alt="" />
+              ))}
             </div>
           </div>
-        )}
-        {!panelOpen && (
-          <button className="absolute right-0 top-20 bg-card border-l border-y rounded-l px-1 py-2" onClick={() => setPanelOpen(true)}>
-            <ChevronLeft className="w-3 h-3" />
-          </button>
-        )}
+          <div>
+            <div className="font-medium mb-1">本款式自定义标签</div>
+            <div className="flex flex-wrap gap-1">
+              {Object.values(drafts).flatMap((d) => d?.customTags || []).map((t, i) => (
+                <span key={i} className="text-xs px-2 py-0.5 rounded bg-accent/30">{t}</span>
+              ))}
+            </div>
+          </div>
+          {library.craftPart && (
+            <div>
+              <div className="font-medium mb-1">工艺-部位参考</div>
+              <div className="text-xs space-y-0.5 text-muted-foreground">
+                {Object.entries(library.craftPart.rules).map(([c, ps]) => (
+                  <div key={c}><b className="text-foreground">{c}</b>: {ps.join(", ")}</div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="border-t px-4 py-3 flex gap-2 justify-end bg-card flex-wrap">
         <Button variant="outline" size="sm" onClick={aiPreLabel}><Sparkles className="w-3 h-3" />AI 预标注</Button>
-        <Button variant="outline" size="sm" onClick={() => {
-          const reason = prompt("跳过原因（可选）") || "";
-          log("skip_image", user.pid, `task=${task.id} img=${image?.id} reason=${reason}`);
-          toast.info("已跳过");
-          if (imgIdx < filteredImages.length - 1) setImgIdx(imgIdx + 1);
-        }}>跳过</Button>
-        <Button variant="outline" size="sm" onClick={() => setShowBatch(true)}>批量提交</Button>
         <Button variant="outline" size="sm" onClick={() => saveAll("drafted")}>保存草稿</Button>
         <Button size="sm" onClick={() => saveAll("submitted")}>提交</Button>
       </div>
 
-      {/* Rules modal */}
-      <Dialog open={showRulesModal} onOpenChange={setShowRulesModal}>
+      <Dialog open={showRules} onOpenChange={setShowRules}>
         <DialogContent>
           <DialogHeader><DialogTitle>📘 标注规范</DialogTitle></DialogHeader>
           <div className="text-sm space-y-2 max-h-96 overflow-auto">
-            <p>1. 多选字段：选择所有适用项，至少选 1 项标记为必填的字段。</p>
-            <p>2. 工艺-部位组：每个工艺允许的部位由库管理员维护，请按实际可见组合添加。</p>
+            <p>1. 每个款式包含多张图片（正面/背面/细节），所有视角共享一份标注。</p>
+            <p>2. 工艺-部位组：每个工艺允许的部位由库管理员维护。</p>
             <p>3. 自定义标签：仅在固定选项无法描述时使用，提交后进入审核流程。</p>
-            <p>4. 视角差异：生产 ToB 注重工艺/材料；商业 ToB 注重款式定位；商业 ToC 注重消费者感受。</p>
-            <p>5. 字段联动：依赖字段（如品类）的变化会刷新关联字段（如领型）的可选项。</p>
+            <p>4. 字段联动：依赖字段（如品类）的变化会刷新关联字段（如领型）的可选项。</p>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Batch submit dialog */}
-      <Dialog open={showBatch} onOpenChange={setShowBatch}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>批量提交</DialogTitle></DialogHeader>
-          <div className="text-sm">
-            将提交以下 {filteredImages.filter((i) => imageStatus(i.id) === "drafted").length} 张图片的所有草稿视角：
-            <ul className="mt-2 max-h-60 overflow-auto text-xs">
-              {filteredImages.filter((i) => imageStatus(i.id) === "drafted").map((i) => (
-                <li key={i.id}>· {i.filename}</li>
-              ))}
-            </ul>
+      <Dialog open={!!historyOpen} onOpenChange={(o) => !o && setHistoryOpen(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader><DialogTitle>历史版本 - {historyOpen && PERSPECTIVE_LABEL[historyOpen]}</DialogTitle></DialogHeader>
+          <div className="space-y-2 max-h-96 overflow-auto">
+            {historyOpen && activeStyle && (() => {
+              const a = getAnnotation(task.id, activeStyle.id, historyOpen);
+              if (!a || a.history.length === 0) return <div className="text-muted-foreground text-sm">暂无历史</div>;
+              return a.history.slice().reverse().map((h, i, arr) => {
+                const prev = arr[i + 1];
+                const diff: string[] = [];
+                if (prev && h.data && prev.data) {
+                  Object.keys({ ...h.data, ...prev.data }).forEach((k) => {
+                    const a1 = JSON.stringify(h.data?.[k]); const a2 = JSON.stringify(prev.data?.[k]);
+                    if (a1 !== a2) diff.push(`${k}: ${a2 || "∅"} → ${a1 || "∅"}`);
+                  });
+                }
+                return (
+                  <div key={i} className="border rounded p-2 text-xs">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <span className="font-medium">{new Date(h.ts).toLocaleString()}</span>
+                        <span className="ml-2">[{h.status}]</span>
+                        <span className="ml-2 text-muted-foreground">by {h.by}</span>
+                      </div>
+                      <Button size="sm" variant="outline" className="h-6" onClick={() => restoreVersion(historyOpen, h)}>
+                        <RotateCcw className="w-3 h-3" />恢复
+                      </Button>
+                    </div>
+                    {h.reason && <div className="text-destructive">原因：{h.reason}</div>}
+                    {diff.length > 0 && <div className="mt-1 text-muted-foreground">变更：{diff.slice(0, 5).join("; ")}</div>}
+                    <details className="mt-1"><summary className="cursor-pointer text-muted-foreground">完整数据</summary>
+                      <pre className="mt-1 bg-muted p-1 rounded">{JSON.stringify(h.data, null, 2)}</pre></details>
+                  </div>
+                );
+              });
+            })()}
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowBatch(false)}>取消</Button>
-            <Button onClick={batchSubmit}>确认提交</Button>
-          </DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setHistoryOpen(null)}>关闭</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
   );
 }
 
+function StatusBadge({ s }: { s: AnnoStatus }) {
+  const map: Record<AnnoStatus, string> = {
+    not_started: "bg-muted text-muted-foreground",
+    drafted: "bg-amber-100 text-amber-900",
+    submitted: "bg-blue-100 text-blue-900",
+    approved: "bg-green-100 text-green-900",
+    rejected: "bg-red-100 text-red-900",
+  };
+  const lab: Record<AnnoStatus, string> = { not_started: "未打标", drafted: "草稿", submitted: "待审核", approved: "已通过", rejected: "已打回" };
+  return <span className={`text-[10px] px-1.5 py-0.5 rounded ${map[s]}`}>{lab[s]}</span>;
+}
+
 function PerspectiveForm({
-  library,
-  draft,
-  editable,
-  onChange,
+  library, draft, editable, onChange,
 }: {
   library: ReturnType<typeof loadDB>["libraries"][number];
   draft: { data: Record<string, string[]>; craftPartGroups: CraftPartGroup[]; customTags: string[] };
@@ -430,10 +483,7 @@ function PerspectiveForm({
       return { ...d, data: { ...d.data, [fk]: next } };
     });
   };
-
-  const setText = (fk: string, val: string) => {
-    onChange((d) => ({ ...d, data: { ...d.data, [fk]: [val] } }));
-  };
+  const setText = (fk: string, val: string) => onChange((d) => ({ ...d, data: { ...d.data, [fk]: [val] } }));
 
   const addCustom = (fk: string) => {
     const v = (customInputs[fk] || "").trim();
@@ -452,7 +502,6 @@ function PerspectiveForm({
     setCustomInputs((p) => ({ ...p, [fk]: "" }));
   };
 
-  // Get rule for a specific tag
   const getRule = (fieldKey: string, value: string) => {
     const db = loadDB();
     return db.rules.find((r) => r.libraryKey === library.key && r.fieldKey === fieldKey && r.optionValue === value);
@@ -464,7 +513,6 @@ function PerspectiveForm({
         const isCraftPartField = cp && (f.key === cp.craftField || f.key === cp.partField);
         if (isCraftPartField) return null;
         const selected = draft.data[f.key] || [];
-        // Linkage: if field has dependsOn + optionMap, restrict options based on dependency selection
         let availableOptions = f.options;
         if (f.dependsOn && f.optionMap) {
           const depVals = draft.data[f.dependsOn] || [];
@@ -487,32 +535,22 @@ function PerspectiveForm({
                   {[...new Set([...availableOptions, ...selected])].map((opt) => {
                     const rule = getRule(f.key, opt);
                     return (
-                      <button
-                        key={opt}
-                        disabled={!editable}
-                        onClick={() => toggleOption(f.key, opt)}
+                      <button key={opt} disabled={!editable} onClick={() => toggleOption(f.key, opt)}
                         className={`px-3 py-1 rounded-full border text-xs flex items-center gap-1 ${
-                          selected.includes(opt)
-                            ? "bg-primary text-primary-foreground border-primary"
-                            : "bg-background hover:bg-muted"
+                          selected.includes(opt) ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-muted"
                         } ${!editable ? "opacity-70 cursor-not-allowed" : ""}`}
-                        title={rule ? `${rule.definition}\n${rule.criteria}` : "暂无规则"}
-                      >
-                        {opt}
-                        <HelpCircle className="w-3 h-3 opacity-60" />
+                        title={rule ? `${rule.definition}\n${rule.criteria}` : "暂无规则"}>
+                        {opt}<HelpCircle className="w-3 h-3 opacity-60" />
                       </button>
                     );
                   })}
                 </div>
                 {f.allowCustom && editable && (
                   <div className="flex gap-2 mt-2">
-                    <Input
-                      placeholder="新自定义标签"
-                      value={customInputs[f.key] || ""}
+                    <Input placeholder="新自定义标签" value={customInputs[f.key] || ""}
                       onChange={(e) => setCustomInputs((p) => ({ ...p, [f.key]: e.target.value }))}
                       onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addCustom(f.key))}
-                      className="h-8"
-                    />
+                      className="h-8" />
                     <Button size="sm" variant="outline" onClick={() => addCustom(f.key)}><Plus className="w-3 h-3" />添加</Button>
                   </div>
                 )}
@@ -540,18 +578,12 @@ function PerspectiveForm({
                 <div key={gi} className="border rounded p-2 space-y-2 bg-muted/30">
                   <div className="flex items-center gap-2">
                     <span className="text-xs">工艺：</span>
-                    <select
-                      disabled={!editable}
-                      className="border rounded px-2 py-1 text-sm bg-background"
-                      value={g.craft}
-                      onChange={(e) =>
-                        onChange((d) => {
-                          const arr = [...d.craftPartGroups];
-                          arr[gi] = { craft: e.target.value, parts: [] };
-                          return { ...d, craftPartGroups: arr };
-                        })
-                      }
-                    >
+                    <select disabled={!editable} className="border rounded px-2 py-1 text-sm bg-background" value={g.craft}
+                      onChange={(e) => onChange((d) => {
+                        const arr = [...d.craftPartGroups];
+                        arr[gi] = { craft: e.target.value, parts: [] };
+                        return { ...d, craftPartGroups: arr };
+                      })}>
                       <option value="">选择工艺</option>
                       {craftField?.options.map((o) => <option key={o}>{o}</option>)}
                     </select>
@@ -563,19 +595,14 @@ function PerspectiveForm({
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {allowed.map((p) => (
-                      <button
-                        key={p}
-                        disabled={!editable}
-                        onClick={() =>
-                          onChange((d) => {
-                            const arr = [...d.craftPartGroups];
-                            const cur = arr[gi].parts;
-                            arr[gi] = { ...arr[gi], parts: cur.includes(p) ? cur.filter((x) => x !== p) : [...cur, p] };
-                            return { ...d, craftPartGroups: arr };
-                          })
-                        }
-                        className={`px-2 py-1 rounded border text-xs ${g.parts.includes(p) ? "bg-accent text-accent-foreground border-accent" : ""}`}
-                      >
+                      <button key={p} disabled={!editable}
+                        onClick={() => onChange((d) => {
+                          const arr = [...d.craftPartGroups];
+                          const cur = arr[gi].parts;
+                          arr[gi] = { ...arr[gi], parts: cur.includes(p) ? cur.filter((x) => x !== p) : [...cur, p] };
+                          return { ...d, craftPartGroups: arr };
+                        })}
+                        className={`px-2 py-1 rounded border text-xs ${g.parts.includes(p) ? "bg-accent text-accent-foreground border-accent" : ""}`}>
                         {p}
                       </button>
                     ))}
