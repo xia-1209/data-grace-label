@@ -16,10 +16,42 @@ const COLORS = ["#6366f1", "#a855f7", "#ec4899", "#f59e0b", "#10b981"];
 
 export function AdminDashboard() {
   const db = useDB();
-  const total = db.annotations.length;
-  const submitted = db.annotations.filter((a) => a.status === "submitted").length;
-  const approved = db.annotations.filter((a) => a.status === "approved").length;
-  const rejected = db.annotations.filter((a) => a.status === "rejected").length;
+  const totalTasks = db.tasks.length;
+  const totalStyles = db.datasets.reduce((n, d) => n + d.styles.length, 0);
+  const totalAnnotators = db.users.filter((u) => u.role === "annotator").length;
+  const submittedOrApproved = db.annotations.filter((a) => ["submitted", "approved"].includes(a.status)).length;
+  const totalSlots = db.tasks.reduce((n, t) => {
+    const ds = db.datasets.find((d) => d.id === t.datasetId);
+    const persSet = new Set<string>();
+    t.annotators.forEach((a) => a.perspectives.forEach((p) => persSet.add(p)));
+    return n + (ds?.styles.length || 0) * persSet.size;
+  }, 0);
+  const completionRate = totalSlots ? Math.round((submittedOrApproved / totalSlots) * 100) : 0;
+
+  // 7-day submit trend
+  const trend = Array.from({ length: 7 }, (_, i) => {
+    const day = new Date(Date.now() - (6 - i) * 86400000);
+    const ds = day.toISOString().slice(0, 10);
+    const c = db.annotations.filter((a) =>
+      a.history.some((h) => h.status === "submitted" && new Date(h.ts).toISOString().slice(0, 10) === ds)
+    ).length || db.annotations.filter((a) => new Date(a.updatedAt).toISOString().slice(0, 10) === ds).length;
+    return { day: ds.slice(5), count: c };
+  });
+
+  // Reject rate per task
+  const rejectByTask = db.tasks.map((t) => {
+    const subs = db.annotations.filter((a) => a.taskId === t.id && ["submitted", "approved", "rejected"].includes(a.status)).length;
+    const rej = db.annotations.filter((a) => a.taskId === t.id && a.status === "rejected").length;
+    return { name: t.name.slice(0, 10), rate: subs ? Math.round((rej / subs) * 100) : 0 };
+  });
+
+  // Annotator workload
+  const workload = db.users.filter((u) => u.role === "annotator").map((u) => ({
+    name: u.username,
+    count: db.annotations.filter((a) => a.annotatorPid === u.pid && ["submitted", "approved"].includes(a.status)).length,
+  })).sort((a, b) => b.count - a.count);
+
+  // Tag heatmap top10
   const tagDist: Record<string, number> = {};
   db.annotations.forEach((a) => {
     Object.values(a.data).forEach((vals) => {
@@ -28,13 +60,7 @@ export function AdminDashboard() {
       });
     });
   });
-  const tagData = Object.entries(tagDist).slice(0, 8).map(([name, value]) => ({ name, value }));
-  const trend = Array.from({ length: 7 }, (_, i) => {
-    const day = new Date(Date.now() - (6 - i) * 86400000);
-    const ds = day.toISOString().slice(0, 10);
-    const c = db.annotations.filter((a) => new Date(a.updatedAt).toISOString().slice(0, 10) === ds).length;
-    return { day: ds.slice(5), count: c };
-  });
+  const topTags = Object.entries(tagDist).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, value]) => ({ name, value }));
 
   const restoreBackup = async (file: File) => {
     if (!confirm("恢复将覆盖所有当前数据，确认？")) return;
@@ -55,6 +81,7 @@ export function AdminDashboard() {
     );
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     saveAs(blob, `annotations_export.json`);
+    log("export_filtered", "admin", `tag=${tag}`);
   };
 
   return (
@@ -63,38 +90,56 @@ export function AdminDashboard() {
         <h1 className="text-2xl font-bold">仪表盘</h1>
         <div className="flex gap-2">
           <Button size="sm" variant="outline" onClick={filteredExport}>过滤导出 JSON</Button>
-          <Button size="sm" variant="outline" onClick={adminBackupExport}>导出全量备份</Button>
+          <Button size="sm" variant="outline" onClick={() => { adminBackupExport(); log("backup_export", "admin"); }}>导出全量备份</Button>
           <label className="inline-flex">
             <input type="file" accept=".json" className="hidden" onChange={(e) => e.target.files?.[0] && restoreBackup(e.target.files[0])} />
             <span className="cursor-pointer text-sm border rounded px-3 py-1.5 hover:bg-muted">恢复备份</span>
           </label>
+          <Button size="sm" variant="destructive" onClick={() => { if (confirm("确定重置演示数据？")) { resetDemo(); toast.success("已重置"); } }}>重置演示数据</Button>
         </div>
       </div>
-      <div className="grid grid-cols-4 gap-4">
-        <StatCard label="总标注数" v={total} />
-        <StatCard label="待审核" v={submitted} />
-        <StatCard label="已通过" v={approved} />
-        <StatCard label="已打回" v={rejected} />
+      <div className="grid grid-cols-5 gap-3">
+        <StatCard label="任务包总数" v={totalTasks} />
+        <StatCard label="款式总数" v={totalStyles} />
+        <StatCard label="标注员人数" v={totalAnnotators} />
+        <StatCard label="完成率 %" v={completionRate} />
+        <StatCard label="待审核" v={db.annotations.filter((a) => a.status === "submitted").length} />
       </div>
       <div className="grid grid-cols-2 gap-4">
         <Card className="p-4">
-          <h3 className="font-semibold mb-2">标签分布</h3>
-          <ResponsiveContainer width="100%" height={250}>
-            <PieChart>
-              <Pie data={tagData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label>
-                {tagData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          </ResponsiveContainer>
-        </Card>
-        <Card className="p-4">
-          <h3 className="font-semibold mb-2">近一周标注趋势</h3>
-          <ResponsiveContainer width="100%" height={250}>
+          <h3 className="font-semibold mb-2">近一周提交趋势</h3>
+          <ResponsiveContainer width="100%" height={220}>
             <LineChart data={trend}>
               <XAxis dataKey="day" /><YAxis allowDecimals={false} /><Tooltip />
               <Line dataKey="count" stroke="hsl(var(--primary))" strokeWidth={2} />
             </LineChart>
+          </ResponsiveContainer>
+        </Card>
+        <Card className="p-4">
+          <h3 className="font-semibold mb-2">各任务包打回率 (%)</h3>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={rejectByTask}>
+              <XAxis dataKey="name" /><YAxis /><Tooltip />
+              <Bar dataKey="rate" fill={COLORS[2]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>
+        <Card className="p-4">
+          <h3 className="font-semibold mb-2">标注员工作量</h3>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={workload}>
+              <XAxis dataKey="name" /><YAxis allowDecimals={false} /><Tooltip />
+              <Bar dataKey="count" fill={COLORS[0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>
+        <Card className="p-4">
+          <h3 className="font-semibold mb-2">Top10 标签使用频率</h3>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={topTags} layout="vertical">
+              <XAxis type="number" /><YAxis type="category" dataKey="name" width={70} /><Tooltip />
+              <Bar dataKey="value" fill={COLORS[1]} />
+            </BarChart>
           </ResponsiveContainer>
         </Card>
       </div>
