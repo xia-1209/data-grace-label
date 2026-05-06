@@ -77,6 +77,7 @@ function ReviewerWorkbench({ taskId, onExit }: { taskId: string; onExit: () => v
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editMode, setEditMode] = useState(false);
   const [editDraft, setEditDraft] = useState<Record<Perspective, Record<string, string[]>>>({} as any);
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
 
   const styleStatusOf = (sId: string): AnnoStatus | "mixed" => {
     const annos = PERSPECTIVES.map((p) => db.annotations.find((a) => a.taskId === task.id && a.styleId === sId && a.perspective === p)).filter(Boolean) as Annotation[];
