@@ -74,9 +74,9 @@ export default function Reviewer() {
     );
   }
 
-  const annosByImage = (dataset?.images || []).map((img) => ({
-    img,
-    annos: PERSPECTIVES.map((p) => db.annotations.find((x) => x.taskId === task.id && x.imageId === img.id && x.perspective === p))
+  const annosByStyle = (dataset?.styles || []).map((s) => ({
+    style: s,
+    annos: PERSPECTIVES.map((p) => db.annotations.find((x) => x.taskId === task.id && x.styleId === s.id && x.perspective === p))
       .filter(Boolean)
       .filter((a) => a!.status === filter),
   })).filter((x) => x.annos.length > 0);
@@ -105,11 +105,15 @@ export default function Reviewer() {
         </div>
       )}
       <div className="space-y-4">
-        {annosByImage.map(({ img, annos }) => (
-          <Card key={img.id} className="p-4 flex gap-4">
-            <img src={img.url} className="w-40 h-40 object-cover rounded" alt="" />
+        {annosByStyle.map(({ style, annos }) => (
+          <Card key={style.id} className="p-4 flex gap-4">
+            <div className="flex flex-col gap-1">
+              {style.images.slice(0, 2).map((im, i) => (
+                <img key={i} src={im.url} className="w-32 h-32 object-cover rounded" alt="" />
+              ))}
+            </div>
             <div className="flex-1 space-y-2">
-              <div className="text-sm font-medium">{img.filename}</div>
+              <div className="text-sm font-medium">款式 {style.styleId} <span className="text-xs text-muted-foreground">({style.images.length} 图)</span></div>
               {annos.map((a) => a && (
                 <div key={a.id} className="border rounded p-2 bg-muted/30">
                   <div className="flex justify-between items-center gap-2">
@@ -128,6 +132,11 @@ export default function Reviewer() {
                         <Input placeholder="打回原因" className="h-7 w-40 text-xs" value={reasons[a.id] || ""} onChange={(e) => setReasons((r) => ({ ...r, [a.id]: e.target.value }))} />
                         <Button size="sm" variant="outline" onClick={() => { setStatus(a.id, "rejected"); toast.success("已打回"); }}>打回</Button>
                         <Button size="sm" onClick={() => { setStatus(a.id, "approved"); toast.success("已通过"); }}>通过</Button>
+                        <Button size="sm" variant="ghost" onClick={() => {
+                          const note = prompt("内部备注（不发给标注员）"); if (!note) return;
+                          const x = loadDB(); const i = x.annotations.findIndex((xx) => xx.id === a.id);
+                          if (i >= 0) { x.annotations[i].reviewerNotes = [...(x.annotations[i].reviewerNotes || []), note]; saveDB(x); toast.success("备注已添加"); }
+                        }}>备注</Button>
                       </div>
                     )}
                   </div>
@@ -136,12 +145,15 @@ export default function Reviewer() {
                     <div className="text-xs text-muted-foreground">工艺-部位：{JSON.stringify(a.craftPartGroups)}</div>
                   )}
                   {a.rejectReason && <div className="text-xs text-red-700">打回原因：{a.rejectReason}</div>}
+                  {a.reviewerNotes && a.reviewerNotes.length > 0 && (
+                    <div className="text-xs text-muted-foreground">内部备注：{a.reviewerNotes.join(" | ")}</div>
+                  )}
                 </div>
               ))}
             </div>
           </Card>
         ))}
-        {annosByImage.length === 0 && <div className="text-muted-foreground">暂无该状态的标注</div>}
+        {annosByStyle.length === 0 && <div className="text-muted-foreground">暂无该状态的标注</div>}
       </div>
     </div>
   );
