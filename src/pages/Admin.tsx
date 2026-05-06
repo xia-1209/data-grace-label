@@ -657,6 +657,11 @@ export function AdminLibraries() {
 // ---------------- Tag Pool ----------------
 export function AdminTagPool() {
   const db = useDB();
+  const [merging, setMerging] = useState<{ libKey: string; fieldKey: string } | null>(null);
+  const [mergeFrom, setMergeFrom] = useState<Set<string>>(new Set());
+  const [mergeTo, setMergeTo] = useState("");
+  const [filterByLog, setFilterByLog] = useState("");
+
   const handle = (id: string, status: "approved" | "rejected") => {
     const x = loadDB();
     const i = x.tagRequests.findIndex((t) => t.id === id);
@@ -670,9 +675,47 @@ export function AdminTagPool() {
     }
     saveDB(x);
   };
+
+  // Tag usage stats
+  const usage = useMemo(() => {
+    const map: Record<string, number> = {};
+    db.annotations.forEach((a) => {
+      Object.entries(a.data).forEach(([fk, vs]) => {
+        const arr = Array.isArray(vs) ? vs : [vs];
+        arr.forEach((v) => {
+          if (!v) return;
+          const k = `${fk}::${v}`;
+          map[k] = (map[k] || 0) + 1;
+        });
+      });
+    });
+    return map;
+  }, [db.annotations]);
+
+  const doMerge = () => {
+    if (!merging || !mergeTo || mergeFrom.size === 0) return;
+    if (!confirm(`将 ${[...mergeFrom].join(", ")} 合并为「${mergeTo}」？标注数据会迁移。`)) return;
+    const x = loadDB();
+    const lib = x.libraries.find((l) => l.key === merging.libKey)!;
+    const f = lib.fields.find((ff) => ff.key === merging.fieldKey)!;
+    if (!f.options.includes(mergeTo)) f.options.push(mergeTo);
+    f.options = f.options.filter((o) => !mergeFrom.has(o) || o === mergeTo);
+    x.annotations.forEach((a) => {
+      const cur = a.data[f.key];
+      if (Array.isArray(cur)) {
+        a.data[f.key] = Array.from(new Set(cur.map((v) => mergeFrom.has(v) ? mergeTo : v)));
+      }
+    });
+    saveDB(x);
+    log("merge_tags", "admin", `${merging.libKey}/${f.key}: ${[...mergeFrom].join(",")} -> ${mergeTo}`);
+    toast.success("已合并");
+    setMerging(null); setMergeFrom(new Set()); setMergeTo("");
+  };
+
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <h1 className="text-2xl font-bold mb-3">标签池管理</h1>
+    <div className="p-6 max-w-5xl mx-auto space-y-4">
+      <h1 className="text-2xl font-bold">标签池管理</h1>
+
       <Card className="p-4">
         <h3 className="font-semibold mb-2">自定义标签申请</h3>
         {db.tagRequests.length === 0 && <div className="text-muted-foreground text-sm">暂无</div>}
@@ -688,6 +731,62 @@ export function AdminTagPool() {
           </div>
         ))}
       </Card>
+
+      <Card className="p-4">
+        <h3 className="font-semibold mb-2">固定选项 + 使用统计 + 合并</h3>
+        {db.libraries.map((lib) => (
+          <div key={lib.key} className="border-t pt-2 mt-2">
+            <div className="font-medium text-sm mb-1">{lib.name}</div>
+            {lib.fields.filter(f => f.type !== "text").map((f) => (
+              <div key={f.key} className="ml-2 mb-2">
+                <div className="text-xs text-muted-foreground flex items-center gap-2">
+                  <span>{f.label} ({f.key})</span>
+                  <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => { setMerging({ libKey: lib.key, fieldKey: f.key }); setMergeFrom(new Set()); setMergeTo(""); }}>合并选项</Button>
+                </div>
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {f.options.map((o) => (
+                    <span key={o} className="text-xs px-2 py-0.5 bg-muted rounded">
+                      {o} <span className="text-muted-foreground">({usage[`${f.key}::${o}`] || 0})</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        ))}
+      </Card>
+
+      <Dialog open={!!merging} onOpenChange={(o) => !o && setMerging(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>合并标签</DialogTitle></DialogHeader>
+          {merging && (() => {
+            const lib = db.libraries.find(l => l.key === merging.libKey)!;
+            const f = lib.fields.find(ff => ff.key === merging.fieldKey)!;
+            return (
+              <div className="space-y-2 text-sm">
+                <div>选择源标签（多选）：</div>
+                <div className="flex flex-wrap gap-2">
+                  {f.options.map((o) => (
+                    <label key={o} className="flex items-center gap-1 text-xs border rounded px-2 py-1">
+                      <input type="checkbox" checked={mergeFrom.has(o)} onChange={(e) => {
+                        const s = new Set(mergeFrom);
+                        if (e.target.checked) s.add(o); else s.delete(o);
+                        setMergeFrom(s);
+                      }} />{o}
+                    </label>
+                  ))}
+                </div>
+                <div>合并为目标标签：</div>
+                <Input value={mergeTo} onChange={(e) => setMergeTo(e.target.value)} placeholder="新标签名（可与源标签重名）" />
+              </div>
+            );
+          })()}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMerging(null)}>取消</Button>
+            <Button onClick={doMerge}>确认合并</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -695,11 +794,20 @@ export function AdminTagPool() {
 // ---------------- Logs ----------------
 export function AdminLogs() {
   const db = useDB();
+  const [filterAction, setFilterAction] = useState("");
+  const [filterPid, setFilterPid] = useState("");
+  const filtered = db.logs.filter((l) =>
+    (!filterAction || l.action.includes(filterAction)) && (!filterPid || l.pid.includes(filterPid))
+  );
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <h1 className="text-2xl font-bold mb-3">操作日志</h1>
+      <div className="flex gap-2 mb-3">
+        <Input placeholder="按操作类型过滤" value={filterAction} onChange={(e) => setFilterAction(e.target.value)} className="w-48" />
+        <Input placeholder="按 PID 过滤" value={filterPid} onChange={(e) => setFilterPid(e.target.value)} className="w-48" />
+      </div>
       <Card className="p-4 max-h-[70vh] overflow-auto">
-        {db.logs.map((l) => (
+        {filtered.map((l) => (
           <div key={l.id} className="border-b py-1 text-xs flex gap-3">
             <span className="text-muted-foreground">{new Date(l.ts).toLocaleString()}</span>
             <span className="font-medium">{l.pid}</span>
@@ -707,7 +815,7 @@ export function AdminLogs() {
             <span className="text-muted-foreground">{l.detail}</span>
           </div>
         ))}
-        {db.logs.length === 0 && <div className="text-sm text-muted-foreground">暂无日志</div>}
+        {filtered.length === 0 && <div className="text-sm text-muted-foreground">暂无日志</div>}
       </Card>
     </div>
   );
