@@ -237,9 +237,20 @@ function seedDB(): DB {
     key: "fabric",
     name: "面料库",
     fields: [
-      { key: "fabric_name", label: "面料名称", type: "text", options: [] },
-      { key: "composition", label: "成分", type: "multi", options: ["棉", "麻", "丝", "毛", "化纤"], allowCustom: true },
+      { key: "fabric_name", label: "面料名称", type: "text", options: [], required: true },
+      { key: "composition", label: "成分", type: "multi", options: ["棉", "麻", "丝", "毛", "化纤", "涤纶"], allowCustom: true },
+      { key: "weight", label: "克重", type: "single", options: ["轻薄(<150g)", "中等(150-250g)", "厚重(>250g)"] },
+      { key: "style", label: "风格", type: "multi", options: ["简约", "复古", "运动", "通勤", "甜美"], allowCustom: true },
       { key: "hand_feel", label: "手感", type: "single", options: ["柔软", "适中", "硬挺"] },
+    ],
+  };
+  const partLib: Library = {
+    key: "part",
+    name: "部件库",
+    fields: [
+      { key: "part_type", label: "部件类型", type: "multi", options: ["领子", "袖口", "口袋", "纽扣", "拉链", "腰带"], allowCustom: true, required: true },
+      { key: "applicable", label: "适用款式", type: "multi", options: ["连衣裙", "上衣", "裤装", "半身裙", "外套"], allowCustom: true },
+      { key: "craft_note", label: "工艺说明", type: "text", options: [] },
     ],
   };
   const commentLib: Library = {
@@ -258,12 +269,12 @@ function seedDB(): DB {
         { url: "https://images.unsplash.com/photo-1551232864-3f0890e580d9?w=800&q=80", angle: "front", filename: "STY-001_front.jpg" },
         { url: "https://images.unsplash.com/photo-1539109136881-3be0616acf4b?w=800&q=80", angle: "back", filename: "STY-001_back.jpg" },
       ],
+      preselect: { production_tob: { category: ["连衣裙"] }, commercial_tob: { style: ["简约"] } },
     },
     {
       id: "sty_2", styleId: "STY-002",
-      images: [
-        { url: "https://images.unsplash.com/photo-1558769132-cb1aea458c5e?w=800&q=80", angle: "front", filename: "STY-002_front.jpg" },
-      ],
+      images: [{ url: "https://images.unsplash.com/photo-1558769132-cb1aea458c5e?w=800&q=80", angle: "front", filename: "STY-002_front.jpg" }],
+      preselect: { production_tob: { category: ["上衣"] } },
     },
     {
       id: "sty_3", styleId: "STY-003",
@@ -273,13 +284,33 @@ function seedDB(): DB {
       ],
     },
   ];
-  const dataset: Dataset = {
-    id: "ds_demo",
-    name: "演示数据集",
-    description: "包含三个款式（共 5 张图片）",
-    styles,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+  const styleDataset: Dataset = {
+    id: "ds_style", name: "第一阶段款式数据集", description: "3 个款式（共 5 张图片）",
+    styles, createdAt: Date.now(), updatedAt: Date.now(),
+  };
+
+  const fabricStyles: DatasetStyle[] = [
+    { id: "fab_1", styleId: "FAB-001",
+      images: [{ url: "https://images.unsplash.com/photo-1528459801416-a9e53bbf4e17?w=800&q=80", angle: "正面", filename: "FAB-001.jpg" }],
+      preselect: { production_tob: { composition: ["棉"] } } },
+    { id: "fab_2", styleId: "FAB-002",
+      images: [{ url: "https://images.unsplash.com/photo-1604176354204-9268737828e4?w=800&q=80", angle: "正面", filename: "FAB-002.jpg" }] },
+  ];
+  const fabricDataset: Dataset = {
+    id: "ds_fabric", name: "第一阶段面料数据集", description: "2 个面料",
+    styles: fabricStyles, createdAt: Date.now(), updatedAt: Date.now(),
+  };
+
+  const partStyles: DatasetStyle[] = [
+    { id: "part_1", styleId: "PRT-001",
+      images: [{ url: "https://images.unsplash.com/photo-1582142306909-195724d33ffc?w=800&q=80", angle: "细节", filename: "PRT-001.jpg" }],
+      preselect: { production_tob: { part_type: ["领子"] } } },
+    { id: "part_2", styleId: "PRT-002",
+      images: [{ url: "https://images.unsplash.com/photo-1620799140408-edc6dcb6d633?w=800&q=80", angle: "细节", filename: "PRT-002.jpg" }] },
+  ];
+  const partDataset: Dataset = {
+    id: "ds_part", name: "第一阶段部件数据集", description: "2 个部件",
+    styles: partStyles, createdAt: Date.now(), updatedAt: Date.now(),
   };
 
   const users: User[] = [
@@ -289,25 +320,30 @@ function seedDB(): DB {
     { pid: "P004", username: "reviewer1", password: "123", role: "reviewer", perspectives: PERSPECTIVES },
   ];
 
-  const task: Task = {
-    id: "task_demo",
-    name: "演示任务-款式库",
-    datasetId: dataset.id,
-    libraryKey: styleLib.key,
+  const styleTask: Task = {
+    id: "task_style", name: "第一阶段款式库", datasetId: styleDataset.id, libraryKey: styleLib.key,
     annotators: [
       { userPid: "P002", perspectives: ["production_tob", "commercial_tob"] },
       { userPid: "P003", perspectives: ["commercial_toc"] },
     ],
-    reviewers: ["P004"],
-    deadline: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
-    createdAt: Date.now(),
+    reviewers: ["P004"], deadline: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10), createdAt: Date.now(),
+  };
+  const fabricTask: Task = {
+    id: "task_fabric", name: "第一阶段面料库", datasetId: fabricDataset.id, libraryKey: fabricLib.key,
+    annotators: [{ userPid: "P002", perspectives: ["production_tob", "commercial_tob"] }],
+    reviewers: ["P004"], deadline: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10), createdAt: Date.now(),
+  };
+  const partTask: Task = {
+    id: "task_part", name: "第一阶段部件库", datasetId: partDataset.id, libraryKey: partLib.key,
+    annotators: [{ userPid: "P003", perspectives: ["commercial_toc"] }],
+    reviewers: ["P004"], deadline: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10), createdAt: Date.now(),
   };
 
   return {
     users,
-    libraries: [styleLib, fabricLib, commentLib],
-    datasets: [dataset],
-    tasks: [task],
+    libraries: [styleLib, fabricLib, partLib, commentLib],
+    datasets: [styleDataset, fabricDataset, partDataset],
+    tasks: [styleTask, fabricTask, partTask],
     annotations: [],
     rules: [
       {
