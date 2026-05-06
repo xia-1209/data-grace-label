@@ -405,7 +405,7 @@ export function AdminTasks() {
       <div className="space-y-3">
         {filtered.map((t) => {
           const ds = db.datasets.find((d) => d.id === t.datasetId);
-          const total = (ds?.images.length || 0);
+          const total = (ds?.styles.length || 0);
           const submitted = db.annotations.filter((a) => a.taskId === t.id && ["submitted", "approved"].includes(a.status)).length;
           return (
             <Card key={t.id} className="p-4">
@@ -432,7 +432,7 @@ export function AdminTasks() {
                 <div className="text-xs font-medium">已提交标注（可强制打回）：</div>
                 {db.annotations.filter((a) => a.taskId === t.id).slice(0, 5).map((a) => (
                   <div key={a.id} className="text-xs flex items-center gap-2 border-t pt-1">
-                    <span>{a.imageId}</span><span>{PERSPECTIVE_LABEL[a.perspective]}</span><span>[{a.status}]</span>
+                    <span>{a.styleId}</span><span>{PERSPECTIVE_LABEL[a.perspective]}</span><span>[{a.status}]</span>
                     {a.status !== "rejected" && <Button size="sm" variant="ghost" className="h-6" onClick={() => forceReject(a.id)}>强制打回</Button>}
                   </div>
                 ))}
