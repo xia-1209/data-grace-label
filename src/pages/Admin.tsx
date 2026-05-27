@@ -677,19 +677,36 @@ function TaskEditor({ id, onClose }: { id: string; onClose: () => void }) {
   };
 
   return (
-    <div className="p-6 max-w-3xl mx-auto space-y-3">
+    <div className="p-6 max-w-3xl mx-auto space-y-4">
       <Button size="sm" variant="ghost" onClick={onClose}>← 返回</Button>
       <h1 className="text-2xl font-bold">{isNew ? "新建" : "编辑"}任务</h1>
-      <Input placeholder="任务名称" value={name} onChange={(e) => setName(e.target.value)} />
-      <select className="border rounded px-2 py-2 w-full" value={datasetId} onChange={(e) => setDatasetId(e.target.value)}>
-        {db.datasets.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-      </select>
-      <select className="border rounded px-2 py-2 w-full" value={libraryKey} onChange={(e) => setLib(e.target.value)}>
-        {db.libraries.map((l) => <option key={l.key} value={l.key}>{l.name}</option>)}
-      </select>
-      <Input type="date" value={deadline} onChange={(e) => setDl(e.target.value)} />
-      <Card className="p-3">
-        <div className="font-medium mb-2">标注员（含视角权限）</div>
+
+      <Field label="任务名称" required help="任务包的展示名称，会显示在标注员/审核员的任务列表中">
+        <Input placeholder="例如：第一阶段款式库标注" value={name} onChange={(e) => setName(e.target.value)} />
+      </Field>
+
+      <Field label="选择数据集" required help="任务包绑定的款式/面料/部件数据来源">
+        <select className="border rounded px-2 py-2 w-full" value={datasetId} onChange={(e) => setDatasetId(e.target.value)}>
+          {db.datasets.map((d) => <option key={d.id} value={d.id}>{d.name}（{d.styles.length} 条）</option>)}
+        </select>
+      </Field>
+
+      <Field label="所属库" required help="决定标注表单中渲染哪些字段（款式库/面料库/部件库...）">
+        <select className="border rounded px-2 py-2 w-full" value={libraryKey} onChange={(e) => setLib(e.target.value)}>
+          {db.libraries.map((l) => <option key={l.key} value={l.key}>{l.name}</option>)}
+        </select>
+      </Field>
+
+      <Field label="截止日期" help="到期后任务仍可标注，但会在仪表盘标红">
+        <Input type="date" value={deadline} onChange={(e) => setDl(e.target.value)} />
+      </Field>
+
+      <Card className="p-3 space-y-2">
+        <div className="font-medium flex items-center gap-1">
+          分配标注员
+          <InfoIcon text="勾选后可进一步选择该标注员在本任务中可编辑的视角（生产/商业ToB/商业ToC）。只展示角色包含 annotator 的用户。" />
+        </div>
+        <div className="text-xs text-muted-foreground">"可编辑视角"决定该标注员在打开任务时能编辑哪些表单视角。</div>
         {db.users.filter((u) => u.roles.includes("annotator")).map((u) => {
           const sel = annotators.find((a) => a.userPid === u.pid);
           return (
@@ -700,6 +717,7 @@ function TaskEditor({ id, onClose }: { id: string; onClose: () => void }) {
               </label>
               {sel && (
                 <div className="ml-6 flex gap-3 mt-1">
+                  <span className="text-xs text-muted-foreground">可编辑视角：</span>
                   {PERSPECTIVES.map((p) => (
                     <label key={p} className="text-xs flex items-center gap-1">
                       <input type="checkbox" checked={sel.perspectives.includes(p)} onChange={() => togglePerspective(u.pid, p)} />
@@ -712,8 +730,12 @@ function TaskEditor({ id, onClose }: { id: string; onClose: () => void }) {
           );
         })}
       </Card>
-      <Card className="p-3">
-        <div className="font-medium mb-2">审核员</div>
+
+      <Card className="p-3 space-y-2">
+        <div className="font-medium flex items-center gap-1">
+          分配审核员
+          <InfoIcon text="只展示角色包含 reviewer 的用户。审核员可以通过/打回该任务下的标注。" />
+        </div>
         {db.users.filter((u) => u.roles.includes("reviewer")).map((u) => (
           <label key={u.pid} className="flex items-center gap-2">
             <input type="checkbox" checked={reviewers.includes(u.pid)} onChange={() => setRev((r) => r.includes(u.pid) ? r.filter((x) => x !== u.pid) : [...r, u.pid])} />
@@ -721,7 +743,8 @@ function TaskEditor({ id, onClose }: { id: string; onClose: () => void }) {
           </label>
         ))}
       </Card>
-      <Button onClick={save}>保存</Button>
+
+      <Button onClick={() => { if (!name.trim()) { toast.error("请填写任务名称"); return; } save(); }}>保存</Button>
     </div>
   );
 }
