@@ -513,11 +513,11 @@ export function AdminTasks() {
             <div className="text-sm">将对 {selected.size} 个任务追加：</div>
             <select className="border rounded px-2 py-2 w-full" value={batchAnnotator} onChange={(e) => setBatchAnnotator(e.target.value)}>
               <option value="">不变更标注员</option>
-              {db.users.filter(u => u.role === "annotator").map(u => <option key={u.pid} value={u.pid}>{u.username} ({u.pid})</option>)}
+              {db.users.filter(u => u.roles.includes("annotator")).map(u => <option key={u.pid} value={u.pid}>{u.username} ({u.pid})</option>)}
             </select>
             <select className="border rounded px-2 py-2 w-full" value={batchReviewer} onChange={(e) => setBatchReviewer(e.target.value)}>
               <option value="">不变更审核员</option>
-              {db.users.filter(u => u.role === "reviewer").map(u => <option key={u.pid} value={u.pid}>{u.username} ({u.pid})</option>)}
+              {db.users.filter(u => u.roles.includes("reviewer")).map(u => <option key={u.pid} value={u.pid}>{u.username} ({u.pid})</option>)}
             </select>
           </div>
           <DialogFooter>
