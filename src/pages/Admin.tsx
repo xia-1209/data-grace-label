@@ -799,13 +799,18 @@ export function AdminUsers() {
         ))}
       </div>
       {editing && (
-        <Card className="p-4 mt-4 space-y-2">
+        <Card className="p-4 mt-4 space-y-3">
           <h3 className="font-semibold">{editing.__new ? "新建" : "编辑"}用户</h3>
-          <Input placeholder="PID" value={editing.pid} onChange={(e) => setEditing({ ...editing, pid: e.target.value })} disabled={!editing.__new} />
-          <Input placeholder="用户名" value={editing.username} onChange={(e) => setEditing({ ...editing, username: e.target.value })} />
-          <Input placeholder="密码" value={editing.password} onChange={(e) => setEditing({ ...editing, password: e.target.value })} />
-          <div>
-            <div className="text-sm mb-1">角色（可多选）</div>
+          <Field label="PID" required help="用户唯一编号，创建后不可修改">
+            <Input placeholder="如 P007" value={editing.pid} onChange={(e) => setEditing({ ...editing, pid: e.target.value })} disabled={!editing.__new} />
+          </Field>
+          <Field label="用户名" required help="登录用，唯一">
+            <Input placeholder="如 zhang_san" value={editing.username} onChange={(e) => setEditing({ ...editing, username: e.target.value })} />
+          </Field>
+          <Field label="密码" required help="演示环境明文存储，请勿用于生产">
+            <Input placeholder="登录密码" value={editing.password} onChange={(e) => setEditing({ ...editing, password: e.target.value })} />
+          </Field>
+          <Field label="角色（可多选）" required help="一个用户可以同时拥有多个角色，登录后可在右上角切换当前活跃角色。">
             <div className="flex gap-4">
               {ALL_ROLES.map((r) => (
                 <label key={r} className="text-sm flex items-center gap-1">
@@ -814,7 +819,7 @@ export function AdminUsers() {
                 </label>
               ))}
             </div>
-          </div>
+          </Field>
           <div className="flex gap-2">
             <Button onClick={() => { if (!editing.roles?.length) { toast.error("至少选择一个角色"); return; } save(); }}>保存</Button>
             <Button variant="outline" onClick={() => setEditing(null)}>取消</Button>
