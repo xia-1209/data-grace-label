@@ -216,6 +216,33 @@ export function loadDB(): DB {
         changed = true;
       }
     });
+    // Migrate libraries: convert legacy craftPart to relations[]; ensure guidelines field
+    db.libraries = (db.libraries || []).map((l: any) => {
+      if (!Array.isArray(l.relations)) {
+        l.relations = [];
+        if (l.craftPart) {
+          l.relations.push({
+            relationId: "rel_craft_part",
+            fromField: l.craftPart.craftField,
+            toField: l.craftPart.partField,
+            mapping: { ...l.craftPart.rules },
+          });
+        }
+        changed = true;
+      }
+      if (typeof l.guidelines !== "string") { l.guidelines = ""; changed = true; }
+      return l;
+    });
+    // Migrate annotations: craftPartGroups -> relationGroups (using rel_craft_part)
+    db.annotations = (db.annotations || []).map((a: any) => {
+      if (!Array.isArray(a.relationGroups)) {
+        a.relationGroups = Array.isArray(a.craftPartGroups)
+          ? a.craftPartGroups.map((g: any) => ({ relationId: "rel_craft_part", from: g.craft, to: g.parts }))
+          : [];
+        changed = true;
+      }
+      return a;
+    });
     if (changed) saveDB(db);
     return db;
   } catch {
