@@ -596,7 +596,7 @@ function TaskEditor({ id, onClose }: { id: string; onClose: () => void }) {
       </Card>
       <Card className="p-3">
         <div className="font-medium mb-2">审核员</div>
-        {db.users.filter((u) => u.role === "reviewer").map((u) => (
+        {db.users.filter((u) => u.roles.includes("reviewer")).map((u) => (
           <label key={u.pid} className="flex items-center gap-2">
             <input type="checkbox" checked={reviewers.includes(u.pid)} onChange={() => setRev((r) => r.includes(u.pid) ? r.filter((x) => x !== u.pid) : [...r, u.pid])} />
             {u.username} ({u.pid})
