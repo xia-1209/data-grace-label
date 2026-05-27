@@ -24,9 +24,9 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     { to: "/admin/datasets", label: "数据集", roles: ["admin"] },
     { to: "/admin/tasks", label: "任务", roles: ["admin"] },
     { to: "/admin/users", label: "用户", roles: ["admin"] },
+    { to: "/admin/tagpool", label: "标签池", roles: ["admin"] },
     { to: "/admin/rules", label: "打标规则", roles: ["admin"] },
     { to: "/admin/libraries", label: "库管理", roles: ["admin"] },
-    { to: "/admin/tagpool", label: "标签池", roles: ["admin"] },
     { to: "/admin/logs", label: "操作日志", roles: ["admin"] },
   ].filter((l) => l.roles.includes(activeRole));
 
