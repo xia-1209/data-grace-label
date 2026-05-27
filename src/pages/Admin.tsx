@@ -18,7 +18,7 @@ export function AdminDashboard() {
   const db = useDB();
   const totalTasks = db.tasks.length;
   const totalStyles = db.datasets.reduce((n, d) => n + d.styles.length, 0);
-  const totalAnnotators = db.users.filter((u) => u.role === "annotator").length;
+  const totalAnnotators = db.users.filter((u) => u.roles.includes("annotator")).length;
   const submittedOrApproved = db.annotations.filter((a) => ["submitted", "approved"].includes(a.status)).length;
   const totalSlots = db.tasks.reduce((n, t) => {
     const ds = db.datasets.find((d) => d.id === t.datasetId);
