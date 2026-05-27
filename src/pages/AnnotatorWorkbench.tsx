@@ -547,12 +547,15 @@ function PerspectiveForm({
   library, draft, editable, onChange,
 }: {
   library: ReturnType<typeof loadDB>["libraries"][number];
-  draft: { data: Record<string, string[]>; craftPartGroups: CraftPartGroup[]; customTags: string[] };
+  draft: { data: Record<string, string[]>; craftPartGroups: CraftPartGroup[]; relationGroups: RelationGroup[]; customTags: string[] };
   editable: boolean;
   onChange: (fn: (d: any) => any) => void;
 }) {
   const [customInputs, setCustomInputs] = useState<Record<string, string>>({});
-  const cp = library.craftPart;
+  const relations = library.relations || [];
+  // field keys that participate in a relation as source or target — render via the relation block
+  const relationFieldKeys = new Set<string>();
+  relations.forEach((r) => { relationFieldKeys.add(r.fromField); relationFieldKeys.add(r.toField); });
 
   const toggleOption = (fk: string, opt: string) => {
     if (!editable) return;
