@@ -290,6 +290,14 @@ function ReviewerWorkbench({ taskId, onExit }: { taskId: string; onExit: () => v
             <div className="p-6 text-muted-foreground">请从左侧选择一个款式</div>
           ) : (
             <div className="p-4 space-y-4">
+              <Card className="p-3 bg-muted/30">
+                <div className="text-sm font-semibold mb-1">📘 库标注规范 · {library.name}</div>
+                {library.guidelines ? (
+                  <div className="text-xs whitespace-pre-wrap text-muted-foreground max-h-40 overflow-auto">{library.guidelines}</div>
+                ) : (
+                  <div className="text-xs text-muted-foreground">暂无标注规范</div>
+                )}
+              </Card>
               <Card className="p-3">
                 <div className="flex items-center gap-3 mb-2">
                   <div className="font-bold text-lg">{activeStyle.styleId}</div>
@@ -400,7 +408,15 @@ function ReviewerWorkbench({ taskId, onExit }: { taskId: string; onExit: () => v
                             </div>
                           );
                         })}
-                        {a.craftPartGroups && a.craftPartGroups.length > 0 && (
+                        {a.relationGroups && a.relationGroups.length > 0 && (
+                          <div className="text-xs text-muted-foreground">关联组：{a.relationGroups.map((g) => {
+                            const r = library.relations?.find((x) => x.relationId === g.relationId);
+                            const ff = library.fields.find((f) => f.key === r?.fromField)?.label || r?.fromField || "?";
+                            const tf = library.fields.find((f) => f.key === r?.toField)?.label || r?.toField || "?";
+                            return `${ff}:${g.from}→${tf}:[${g.to.join("/")}]`;
+                          }).join("; ")}</div>
+                        )}
+                        {a.craftPartGroups && a.craftPartGroups.length > 0 && (!a.relationGroups || a.relationGroups.length === 0) && (
                           <div className="text-xs text-muted-foreground">工艺-部位：{a.craftPartGroups.map((g) => `${g.craft}[${g.parts.join("/")}]`).join("; ")}</div>
                         )}
                         {a.customTags && a.customTags.length > 0 && (

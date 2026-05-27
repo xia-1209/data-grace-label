@@ -6,6 +6,7 @@ import {
   Annotation,
   AnnoStatus,
   CraftPartGroup,
+  RelationGroup,
   PERSPECTIVES,
   PERSPECTIVE_LABEL,
   Perspective,
@@ -28,11 +29,12 @@ interface DraftMap {
   [perspective: string]: {
     data: Record<string, string[]>;
     craftPartGroups: CraftPartGroup[];
+    relationGroups: RelationGroup[];
     customTags: string[];
     dirty?: boolean;
   };
 }
-const emptyDraft = () => ({ data: {}, craftPartGroups: [], customTags: [], dirty: false });
+const emptyDraft = () => ({ data: {}, craftPartGroups: [], relationGroups: [], customTags: [], dirty: false });
 
 const STATUSES: { key: AnnoStatus | "all"; label: string }[] = [
   { key: "all", label: "全部" },
@@ -101,8 +103,8 @@ export default function AnnotatorWorkbench() {
       const a = getAnnotation(task.id, activeStyle.id, p);
       const preselect = activeStyle.preselect?.[p];
       next[p] = a
-        ? { data: a.data as Record<string, string[]>, craftPartGroups: a.craftPartGroups || [], customTags: a.customTags, dirty: false }
-        : { data: preselect ? { ...preselect } : {}, craftPartGroups: [], customTags: [], dirty: !!preselect };
+        ? { data: a.data as Record<string, string[]>, craftPartGroups: a.craftPartGroups || [], relationGroups: a.relationGroups || [], customTags: a.customTags, dirty: false }
+        : { data: preselect ? { ...preselect } : {}, craftPartGroups: [], relationGroups: [], customTags: [], dirty: !!preselect };
     });
     setDrafts(next);
     setImgIdx(0);
@@ -133,7 +135,7 @@ export default function AnnotatorWorkbench() {
       if (!editablePerspectives.includes(p)) return;
       const draft = drafts[p];
       if (!draft) return;
-      const isEmpty = Object.keys(draft.data).length === 0 && draft.craftPartGroups.length === 0 && draft.customTags.length === 0;
+      const isEmpty = Object.keys(draft.data).length === 0 && draft.craftPartGroups.length === 0 && draft.relationGroups.length === 0 && draft.customTags.length === 0;
       if (status === "submitted" && isEmpty) return;
       if (status === "drafted" && isEmpty && !draft.dirty) return;
       const existing = getAnnotation(task.id, activeStyle.id, p);
@@ -146,12 +148,13 @@ export default function AnnotatorWorkbench() {
         status,
         data: draft.data,
         craftPartGroups: draft.craftPartGroups,
+        relationGroups: draft.relationGroups,
         customTags: draft.customTags,
         annotatorPid: user.pid,
         reviewerNotes: existing?.reviewerNotes || [],
         history: [...(existing?.history || []), {
           ts: Date.now(), status, by: user.pid,
-          data: draft.data, craftPartGroups: draft.craftPartGroups, customTags: draft.customTags,
+          data: draft.data, craftPartGroups: draft.craftPartGroups, relationGroups: draft.relationGroups, customTags: draft.customTags,
         }],
         updatedAt: Date.now(),
       };
@@ -230,6 +233,7 @@ export default function AnnotatorWorkbench() {
       [p]: {
         data: ver.data || {},
         craftPartGroups: ver.craftPartGroups || [],
+        relationGroups: ver.relationGroups || [],
         customTags: ver.customTags || [],
         dirty: true,
       },
@@ -428,13 +432,35 @@ export default function AnnotatorWorkbench() {
                   ))}
                 </div>
               </div>
-              {library.craftPart && (
+              {library.guidelines ? (
                 <div>
-                  <div className="font-medium mb-1">工艺-部位参考</div>
-                  <div className="text-xs space-y-0.5 text-muted-foreground">
-                    {Object.entries(library.craftPart.rules).map(([c, ps]) => (
-                      <div key={c}><b className="text-foreground">{c}</b>: {ps.join(", ")}</div>
-                    ))}
+                  <div className="font-medium mb-1 flex items-center gap-1"><BookOpen className="w-3 h-3" />库标注规范</div>
+                  <div className="text-xs whitespace-pre-wrap text-muted-foreground bg-muted/40 rounded p-2 max-h-64 overflow-auto">{library.guidelines}</div>
+                </div>
+              ) : (
+                <div>
+                  <div className="font-medium mb-1 flex items-center gap-1"><BookOpen className="w-3 h-3" />库标注规范</div>
+                  <div className="text-xs text-muted-foreground">暂无标注规范</div>
+                </div>
+              )}
+              {(library.relations || []).length > 0 && (
+                <div>
+                  <div className="font-medium mb-1">字段关联参考</div>
+                  <div className="text-xs space-y-1 text-muted-foreground">
+                    {(library.relations || []).map((r) => {
+                      const ff = library.fields.find((f) => f.key === r.fromField);
+                      const tf = library.fields.find((f) => f.key === r.toField);
+                      return (
+                        <div key={r.relationId}>
+                          <b className="text-foreground">{ff?.label || r.fromField} → {tf?.label || r.toField}</b>
+                          <div className="pl-2 space-y-0.5">
+                            {Object.entries(r.mapping).slice(0, 6).map(([k, vs]) => (
+                              <div key={k}><span className="text-foreground">{k}</span>: {(vs as string[]).join(", ")}</div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -521,12 +547,15 @@ function PerspectiveForm({
   library, draft, editable, onChange,
 }: {
   library: ReturnType<typeof loadDB>["libraries"][number];
-  draft: { data: Record<string, string[]>; craftPartGroups: CraftPartGroup[]; customTags: string[] };
+  draft: { data: Record<string, string[]>; craftPartGroups: CraftPartGroup[]; relationGroups: RelationGroup[]; customTags: string[] };
   editable: boolean;
   onChange: (fn: (d: any) => any) => void;
 }) {
   const [customInputs, setCustomInputs] = useState<Record<string, string>>({});
-  const cp = library.craftPart;
+  const relations = library.relations || [];
+  // field keys that participate in a relation as source or target — render via the relation block
+  const relationFieldKeys = new Set<string>();
+  relations.forEach((r) => { relationFieldKeys.add(r.fromField); relationFieldKeys.add(r.toField); });
 
   const toggleOption = (fk: string, opt: string) => {
     if (!editable) return;
@@ -563,8 +592,7 @@ function PerspectiveForm({
   return (
     <div className="space-y-4">
       {library.fields.map((f) => {
-        const isCraftPartField = cp && (f.key === cp.craftField || f.key === cp.partField);
-        if (isCraftPartField) return null;
+        if (relationFieldKeys.has(f.key)) return null;
         const selected = draft.data[f.key] || [];
         let availableOptions = f.options;
         if (f.dependsOn && f.optionMap) {
@@ -641,61 +669,70 @@ function PerspectiveForm({
         );
       })}
 
-      {cp && (
-        <div className="border-t pt-4">
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-sm font-medium">工艺-部位组合</div>
-            {editable && (
-              <Button size="sm" variant="outline" onClick={() => onChange((d) => ({ ...d, craftPartGroups: [...d.craftPartGroups, { craft: "", parts: [] }] }))}>
-                <Plus className="w-3 h-3" />添加组
-              </Button>
-            )}
-          </div>
-          <div className="space-y-2">
-            {draft.craftPartGroups.map((g, gi) => {
-              const craftField = library.fields.find((f) => f.key === cp.craftField);
-              const allowed = cp.rules[g.craft] || [];
-              return (
-                <div key={gi} className="border rounded p-2 space-y-2 bg-muted/30">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs">工艺：</span>
-                    <select disabled={!editable} className="border rounded px-2 py-1 text-sm bg-background" value={g.craft}
-                      onChange={(e) => onChange((d) => {
-                        const arr = [...d.craftPartGroups];
-                        arr[gi] = { craft: e.target.value, parts: [] };
-                        return { ...d, craftPartGroups: arr };
-                      })}>
-                      <option value="">选择工艺</option>
-                      {craftField?.options.map((o) => <option key={o}>{o}</option>)}
-                    </select>
-                    {editable && (
-                      <Button size="icon" variant="ghost" onClick={() =>
-                        onChange((d) => ({ ...d, craftPartGroups: d.craftPartGroups.filter((_: any, i: number) => i !== gi) }))
-                      }><X className="w-3 h-3" /></Button>
-                    )}
+      {relations.map((rel) => {
+        const fromField = library.fields.find((f) => f.key === rel.fromField);
+        const toField = library.fields.find((f) => f.key === rel.toField);
+        if (!fromField || !toField) return null;
+        const groups = draft.relationGroups.filter((g) => g.relationId === rel.relationId);
+        return (
+          <div key={rel.relationId} className="border-t pt-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-sm font-medium">{fromField.label} → {toField.label}</div>
+              {editable && (
+                <Button size="sm" variant="outline" onClick={() => onChange((d) => ({
+                  ...d,
+                  relationGroups: [...d.relationGroups, { relationId: rel.relationId, from: "", to: [] }],
+                }))}>
+                  <Plus className="w-3 h-3" />添加组
+                </Button>
+              )}
+            </div>
+            <div className="space-y-2">
+              {groups.map((g) => {
+                const absIdx = draft.relationGroups.indexOf(g);
+                const allowed = rel.mapping[g.from] || (g.from ? toField.options : []);
+                return (
+                  <div key={absIdx} className="border rounded p-2 space-y-2 bg-muted/30">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs">{fromField.label}：</span>
+                      <select disabled={!editable} className="border rounded px-2 py-1 text-sm bg-background" value={g.from}
+                        onChange={(e) => onChange((d) => {
+                          const arr = [...d.relationGroups];
+                          arr[absIdx] = { ...arr[absIdx], from: e.target.value, to: [] };
+                          return { ...d, relationGroups: arr };
+                        })}>
+                        <option value="">选择{fromField.label}</option>
+                        {fromField.options.map((o) => <option key={o}>{o}</option>)}
+                      </select>
+                      {editable && (
+                        <Button size="icon" variant="ghost" onClick={() =>
+                          onChange((d) => ({ ...d, relationGroups: d.relationGroups.filter((_: any, i: number) => i !== absIdx) }))
+                        }><X className="w-3 h-3" /></Button>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {allowed.map((p) => (
+                        <button key={p} disabled={!editable}
+                          onClick={() => onChange((d) => {
+                            const arr = [...d.relationGroups];
+                            const cur = arr[absIdx].to;
+                            arr[absIdx] = { ...arr[absIdx], to: cur.includes(p) ? cur.filter((x) => x !== p) : [...cur, p] };
+                            return { ...d, relationGroups: arr };
+                          })}
+                          className={`px-2 py-1 rounded border text-xs ${g.to.includes(p) ? "bg-accent text-accent-foreground border-accent" : ""}`}>
+                          {p}
+                        </button>
+                      ))}
+                      {g.from && allowed.length === 0 && <span className="text-xs text-muted-foreground">该{fromField.label}暂无可选{toField.label}</span>}
+                    </div>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    {allowed.map((p) => (
-                      <button key={p} disabled={!editable}
-                        onClick={() => onChange((d) => {
-                          const arr = [...d.craftPartGroups];
-                          const cur = arr[gi].parts;
-                          arr[gi] = { ...arr[gi], parts: cur.includes(p) ? cur.filter((x) => x !== p) : [...cur, p] };
-                          return { ...d, craftPartGroups: arr };
-                        })}
-                        className={`px-2 py-1 rounded border text-xs ${g.parts.includes(p) ? "bg-accent text-accent-foreground border-accent" : ""}`}>
-                        {p}
-                      </button>
-                    ))}
-                    {g.craft && allowed.length === 0 && <span className="text-xs text-muted-foreground">该工艺暂无可选部位</span>}
-                  </div>
-                </div>
-              );
-            })}
-            {draft.craftPartGroups.length === 0 && <div className="text-xs text-muted-foreground">尚未添加</div>}
+                );
+              })}
+              {groups.length === 0 && <div className="text-xs text-muted-foreground">尚未添加</div>}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })}
     </div>
   );
 }
