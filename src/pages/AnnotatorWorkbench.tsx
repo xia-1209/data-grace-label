@@ -232,6 +232,7 @@ export default function AnnotatorWorkbench() {
       [p]: {
         data: ver.data || {},
         craftPartGroups: ver.craftPartGroups || [],
+        relationGroups: ver.relationGroups || [],
         customTags: ver.customTags || [],
         dirty: true,
       },
