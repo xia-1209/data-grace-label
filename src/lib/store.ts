@@ -98,6 +98,12 @@ export interface CraftPartGroup {
   parts: string[];
 }
 
+export interface RelationGroup {
+  relationId: string;
+  from: string;
+  to: string[];
+}
+
 export interface AnnoVersion {
   ts: number;
   status: AnnoStatus;
@@ -105,18 +111,20 @@ export interface AnnoVersion {
   reason?: string;
   data?: Record<string, string[] | string>;
   craftPartGroups?: CraftPartGroup[];
+  relationGroups?: RelationGroup[];
   customTags?: string[];
-  note?: string; // reviewer internal note
+  note?: string;
 }
 
 export interface Annotation {
   id: string;
   taskId: string;
-  styleId: string; // refers DatasetStyle.id
+  styleId: string;
   perspective: Perspective;
   status: AnnoStatus;
   data: Record<string, string[] | string>;
   craftPartGroups?: CraftPartGroup[];
+  relationGroups?: RelationGroup[];
   customTags: string[];
   annotatorPid?: string;
   reviewerPid?: string;
