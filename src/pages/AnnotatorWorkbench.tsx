@@ -6,6 +6,7 @@ import {
   Annotation,
   AnnoStatus,
   CraftPartGroup,
+  RelationGroup,
   PERSPECTIVES,
   PERSPECTIVE_LABEL,
   Perspective,
@@ -28,11 +29,12 @@ interface DraftMap {
   [perspective: string]: {
     data: Record<string, string[]>;
     craftPartGroups: CraftPartGroup[];
+    relationGroups: RelationGroup[];
     customTags: string[];
     dirty?: boolean;
   };
 }
-const emptyDraft = () => ({ data: {}, craftPartGroups: [], customTags: [], dirty: false });
+const emptyDraft = () => ({ data: {}, craftPartGroups: [], relationGroups: [], customTags: [], dirty: false });
 
 const STATUSES: { key: AnnoStatus | "all"; label: string }[] = [
   { key: "all", label: "全部" },
