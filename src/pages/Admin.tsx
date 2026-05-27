@@ -631,18 +631,24 @@ export function AdminUsers() {
     saveDB(x); setEditing(null); toast.success("已保存");
   };
 
+  const ALL_ROLES: Role[] = ["annotator", "reviewer", "admin"];
+  const toggleRole = (r: Role) => setEditing({
+    ...editing,
+    roles: editing.roles.includes(r) ? editing.roles.filter((x: Role) => x !== r) : [...editing.roles, r],
+  });
+
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <div className="flex justify-between mb-3">
         <h1 className="text-2xl font-bold">用户管理</h1>
-        <Button onClick={() => setEditing({ __new: true, pid: "", username: "", password: "", role: "annotator", perspectives: [] })}>新建用户</Button>
+        <Button onClick={() => setEditing({ __new: true, pid: "", username: "", password: "", roles: ["annotator"] })}>新建用户</Button>
       </div>
       <div className="space-y-2">
         {db.users.map((u) => (
           <Card key={u.pid} className="p-3 flex justify-between items-center">
             <div>
-              <div className="font-medium">{u.username} <span className="text-xs text-muted-foreground">{u.pid} · {u.role}</span></div>
-              <div className="text-xs">视角权限：{u.perspectives.join(", ") || "—"}</div>
+              <div className="font-medium">{u.username} <span className="text-xs text-muted-foreground">{u.pid}</span></div>
+              <div className="text-xs">角色：{u.roles.join(", ") || "—"}</div>
             </div>
             <div className="flex gap-2">
               <Button size="sm" variant="outline" onClick={() => setEditing({ ...u })}>编辑</Button>
@@ -657,22 +663,19 @@ export function AdminUsers() {
           <Input placeholder="PID" value={editing.pid} onChange={(e) => setEditing({ ...editing, pid: e.target.value })} disabled={!editing.__new} />
           <Input placeholder="用户名" value={editing.username} onChange={(e) => setEditing({ ...editing, username: e.target.value })} />
           <Input placeholder="密码" value={editing.password} onChange={(e) => setEditing({ ...editing, password: e.target.value })} />
-          <select className="border rounded px-2 py-2 w-full" value={editing.role} onChange={(e) => setEditing({ ...editing, role: e.target.value as Role })}>
-            <option value="annotator">annotator</option><option value="reviewer">reviewer</option><option value="admin">admin</option>
-          </select>
-          <div className="flex gap-3">
-            {PERSPECTIVES.map((p) => (
-              <label key={p} className="text-sm flex items-center gap-1">
-                <input type="checkbox" checked={editing.perspectives.includes(p)} onChange={() => setEditing({
-                  ...editing,
-                  perspectives: editing.perspectives.includes(p) ? editing.perspectives.filter((x: string) => x !== p) : [...editing.perspectives, p],
-                })} />
-                {PERSPECTIVE_LABEL[p]}
-              </label>
-            ))}
+          <div>
+            <div className="text-sm mb-1">角色（可多选）</div>
+            <div className="flex gap-4">
+              {ALL_ROLES.map((r) => (
+                <label key={r} className="text-sm flex items-center gap-1">
+                  <input type="checkbox" checked={editing.roles.includes(r)} onChange={() => toggleRole(r)} />
+                  {r}
+                </label>
+              ))}
+            </div>
           </div>
           <div className="flex gap-2">
-            <Button onClick={save}>保存</Button>
+            <Button onClick={() => { if (!editing.roles?.length) { toast.error("至少选择一个角色"); return; } save(); }}>保存</Button>
             <Button variant="outline" onClick={() => setEditing(null)}>取消</Button>
           </div>
         </Card>
