@@ -408,7 +408,15 @@ function ReviewerWorkbench({ taskId, onExit }: { taskId: string; onExit: () => v
                             </div>
                           );
                         })}
-                        {a.craftPartGroups && a.craftPartGroups.length > 0 && (
+                        {a.relationGroups && a.relationGroups.length > 0 && (
+                          <div className="text-xs text-muted-foreground">关联组：{a.relationGroups.map((g) => {
+                            const r = library.relations?.find((x) => x.relationId === g.relationId);
+                            const ff = library.fields.find((f) => f.key === r?.fromField)?.label || r?.fromField || "?";
+                            const tf = library.fields.find((f) => f.key === r?.toField)?.label || r?.toField || "?";
+                            return `${ff}:${g.from}→${tf}:[${g.to.join("/")}]`;
+                          }).join("; ")}</div>
+                        )}
+                        {a.craftPartGroups && a.craftPartGroups.length > 0 && (!a.relationGroups || a.relationGroups.length === 0) && (
                           <div className="text-xs text-muted-foreground">工艺-部位：{a.craftPartGroups.map((g) => `${g.craft}[${g.parts.join("/")}]`).join("; ")}</div>
                         )}
                         {a.customTags && a.customTags.length > 0 && (
