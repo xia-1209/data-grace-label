@@ -818,11 +818,18 @@ export function AdminUsers() {
 
   const save = () => {
     const x = loadDB();
-    if (editing.__new) {
-      x.users.push({ ...editing, pid: editing.pid || `P${100 + x.users.length + 1}` });
+    const { __new, ...rest } = editing;
+    const clean = {
+      pid: rest.pid,
+      username: rest.username,
+      password: rest.password,
+      roles: Array.isArray(rest.roles) ? [...rest.roles] : [],
+    };
+    if (__new) {
+      x.users.push({ ...clean, pid: clean.pid || `P${100 + x.users.length + 1}` });
     } else {
-      const i = x.users.findIndex((u) => u.pid === editing.pid);
-      x.users[i] = editing;
+      const i = x.users.findIndex((u) => u.pid === clean.pid);
+      if (i >= 0) x.users[i] = clean;
     }
     saveDB(x); setEditing(null); toast.success("已保存");
   };
