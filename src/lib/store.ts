@@ -314,10 +314,12 @@ function seedDB(): DB {
   };
 
   const users: User[] = [
-    { pid: "P001", username: "admin", password: "admin", role: "admin", perspectives: PERSPECTIVES },
-    { pid: "P002", username: "annotator1", password: "123", role: "annotator", perspectives: ["production_tob", "commercial_tob"] },
-    { pid: "P003", username: "annotator2", password: "123", role: "annotator", perspectives: ["commercial_toc"] },
-    { pid: "P004", username: "reviewer1", password: "123", role: "reviewer", perspectives: PERSPECTIVES },
+    { pid: "P001", username: "admin", password: "admin", roles: ["admin"] },
+    { pid: "P002", username: "annotator1", password: "123", roles: ["annotator"] },
+    { pid: "P003", username: "annotator2", password: "123", roles: ["annotator"] },
+    { pid: "P004", username: "reviewer1", password: "123", roles: ["reviewer"] },
+    { pid: "P005", username: "lead", password: "123", roles: ["annotator", "reviewer"] },
+    { pid: "P006", username: "superadmin", password: "123", roles: ["admin", "reviewer", "annotator"] },
   ];
 
   const styleTask: Task = {
