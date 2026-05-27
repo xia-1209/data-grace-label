@@ -932,23 +932,32 @@ export function AdminRules() {
         ))}
       </div>
       {editing && (
-        <Card className="p-4 mt-4 space-y-2">
+        <Card className="p-4 mt-4 space-y-3">
           <h3 className="font-semibold">规则编辑</h3>
-          <select className="border rounded px-2 py-2 w-full text-sm" value={editing.libraryKey} onChange={(e) => setEditing({ ...editing, libraryKey: e.target.value, fieldKey: "" })}>
-            {db.libraries.map((l) => <option key={l.key} value={l.key}>{l.name}</option>)}
-          </select>
-          <select className="border rounded px-2 py-2 w-full text-sm" value={editing.fieldKey} onChange={(e) => setEditing({ ...editing, fieldKey: e.target.value, optionValue: "" })}>
-            <option value="">选择字段</option>
-            {curLib?.fields.filter((f) => f.type !== "text").map((f) => <option key={f.key} value={f.key}>{f.label} ({f.key})</option>)}
-          </select>
-          <select className="border rounded px-2 py-2 w-full text-sm" value={editing.optionValue} onChange={(e) => setEditing({ ...editing, optionValue: e.target.value })}>
-            <option value="">选择标签值</option>
-            {curField?.options.map((o) => <option key={o} value={o}>{o}</option>)}
-          </select>
-          <Input placeholder="定义" value={editing.definition} onChange={(e) => setEditing({ ...editing, definition: e.target.value })} />
-          <Input placeholder="判断标准" value={editing.criteria} onChange={(e) => setEditing({ ...editing, criteria: e.target.value })} />
-          <div>
-            <div className="text-xs mb-1">互斥标签（同字段）：</div>
+          <Field label="所属库" required help="规则归属的库">
+            <select className="border rounded px-2 py-2 w-full text-sm" value={editing.libraryKey} onChange={(e) => setEditing({ ...editing, libraryKey: e.target.value, fieldKey: "" })}>
+              {db.libraries.map((l) => <option key={l.key} value={l.key}>{l.name}</option>)}
+            </select>
+          </Field>
+          <Field label="字段" required help="规则约束的字段（仅可选择有固定选项的字段）">
+            <select className="border rounded px-2 py-2 w-full text-sm" value={editing.fieldKey} onChange={(e) => setEditing({ ...editing, fieldKey: e.target.value, optionValue: "" })}>
+              <option value="">选择字段</option>
+              {curLib?.fields.filter((f) => f.type !== "text").map((f) => <option key={f.key} value={f.key}>{f.label} ({f.key})</option>)}
+            </select>
+          </Field>
+          <Field label="标签值" required help="规则针对的具体标签选项">
+            <select className="border rounded px-2 py-2 w-full text-sm" value={editing.optionValue} onChange={(e) => setEditing({ ...editing, optionValue: e.target.value })}>
+              <option value="">选择标签值</option>
+              {curField?.options.map((o) => <option key={o} value={o}>{o}</option>)}
+            </select>
+          </Field>
+          <Field label="定义" help="标签本身的含义描述，会显示在标注员的规则浮层中">
+            <Input placeholder="例如：领口呈 V 字形，前中开口" value={editing.definition} onChange={(e) => setEditing({ ...editing, definition: e.target.value })} />
+          </Field>
+          <Field label="判断标准" help="标注员判断该标签是否适用时遵循的可操作规则（可写多条，建议用分号分隔）">
+            <Input placeholder="例如：开口角度 30°~90°；前中点低于锁骨" value={editing.criteria} onChange={(e) => setEditing({ ...editing, criteria: e.target.value })} />
+          </Field>
+          <Field label="互斥标签（同字段）" help="勾选后，标注时若选了本标签，这些标签不可同时被选">
             <div className="flex flex-wrap gap-1">
               {curField?.options.filter((o) => o !== editing.optionValue).map((o) => (
                 <label key={o} className="text-xs border rounded px-2 py-1 flex items-center gap-1">
@@ -959,11 +968,13 @@ export function AdminRules() {
                 </label>
               ))}
             </div>
-          </div>
-          <Input placeholder='依赖条件 e.g. category == "连衣裙"' value={editing.dependency} onChange={(e) => setEditing({ ...editing, dependency: e.target.value })} />
+          </Field>
+          <Field label="依赖表达式" help={`仅当其它字段满足该条件时，本标签才可用。示例：category == "连衣裙"；多条件用 && 连接。`}>
+            <Input placeholder='例如：category == "连衣裙"' value={editing.dependency} onChange={(e) => setEditing({ ...editing, dependency: e.target.value })} />
+          </Field>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={editing.notRecommended} onChange={(e) => setEditing({ ...editing, notRecommended: e.target.checked })} />
-            默认不推荐
+            默认不推荐 <InfoIcon text="开启后该标签会标红/置灰提示标注员谨慎选择" />
           </label>
           <div>
             <div className="text-xs mb-1">正例图（最多3张）：</div>
