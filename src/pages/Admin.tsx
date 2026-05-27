@@ -423,6 +423,12 @@ export function AdminTasks() {
   const [batchAnnotator, setBatchAnnotator] = useState("");
   const [batchReviewer, setBatchReviewer] = useState("");
 
+  const [selectedAnnos, setSelectedAnnos] = useState<Set<string>>(new Set());
+  const [batchRejectOpen, setBatchRejectOpen] = useState(false);
+  const [batchRejectReason, setBatchRejectReason] = useState("");
+  const [taskRejectId, setTaskRejectId] = useState<string | null>(null);
+  const [taskRejectReason, setTaskRejectReason] = useState("");
+
   const filtered = db.tasks.filter((t) => t.name.toLowerCase().includes(search.toLowerCase()));
 
   const del = (id: string) => {
@@ -444,7 +450,49 @@ export function AdminTasks() {
     x.annotations[i].rejectReason = reason;
     x.annotations[i].history.push({ ts: Date.now(), status: "rejected", by: "admin", reason });
     saveDB(x);
+    log("force_reject", "admin", `${x.annotations[i].styleId}: ${reason}`);
     toast.success("已强制打回");
+  };
+
+  const applyBatchReject = () => {
+    if (!batchRejectReason.trim()) { toast.error("请填写打回原因"); return; }
+    const x = loadDB();
+    let n = 0;
+    selectedAnnos.forEach((id) => {
+      const i = x.annotations.findIndex((a) => a.id === id);
+      if (i < 0) return;
+      const a = x.annotations[i];
+      if (!["submitted", "approved"].includes(a.status)) return;
+      a.status = "rejected";
+      a.rejectReason = batchRejectReason;
+      a.history.push({ ts: Date.now(), status: "rejected", by: "admin", reason: batchRejectReason });
+      n++;
+    });
+    saveDB(x);
+    log("batch_reject", "admin", `${n} 条：${batchRejectReason}`);
+    toast.success(`已批量打回 ${n} 条`);
+    setSelectedAnnos(new Set());
+    setBatchRejectOpen(false);
+    setBatchRejectReason("");
+  };
+
+  const applyTaskReject = () => {
+    if (!taskRejectId || !taskRejectReason.trim()) { toast.error("请填写打回原因"); return; }
+    const x = loadDB();
+    let n = 0;
+    x.annotations.forEach((a) => {
+      if (a.taskId !== taskRejectId) return;
+      if (a.status !== "submitted") return;
+      a.status = "rejected";
+      a.rejectReason = taskRejectReason;
+      a.history.push({ ts: Date.now(), status: "rejected", by: "admin", reason: taskRejectReason });
+      n++;
+    });
+    saveDB(x);
+    log("task_batch_reject", "admin", `task=${taskRejectId} ${n} 条：${taskRejectReason}`);
+    toast.success(`任务整体打回完成（${n} 条）`);
+    setTaskRejectId(null);
+    setTaskRejectReason("");
   };
 
   const applyBatch = () => {
@@ -474,6 +522,7 @@ export function AdminTasks() {
         <div className="flex gap-2">
           <Input placeholder="搜索任务…" value={search} onChange={(e) => setSearch(e.target.value)} className="w-48" />
           {selected.size > 0 && <Button size="sm" variant="outline" onClick={() => setBatchOpen(true)}>批量分配 ({selected.size})</Button>}
+          {selectedAnnos.size > 0 && <Button size="sm" variant="destructive" onClick={() => setBatchRejectOpen(true)}>批量打回标注 ({selectedAnnos.size})</Button>}
           <Button onClick={() => setEditing("__new")}>新建任务</Button>
         </div>
       </div>
@@ -482,6 +531,8 @@ export function AdminTasks() {
           const ds = db.datasets.find((d) => d.id === t.datasetId);
           const total = (ds?.styles.length || 0);
           const submitted = db.annotations.filter((a) => a.taskId === t.id && ["submitted", "approved"].includes(a.status)).length;
+          const taskAnnos = db.annotations.filter((a) => a.taskId === t.id);
+          const pendingCount = taskAnnos.filter((a) => a.status === "submitted").length;
           return (
             <Card key={t.id} className="p-4">
               <div className="flex justify-between gap-2">
@@ -494,23 +545,43 @@ export function AdminTasks() {
                   <div>
                     <div className="font-semibold">{t.name}</div>
                     <div className="text-xs text-muted-foreground">数据集：{ds?.name} · 截止 {t.deadline}</div>
-                    <div className="text-xs">进度 {submitted}/{total}</div>
+                    <div className="text-xs">进度 {submitted}/{total} · 待审 {pendingCount}</div>
                     <div className="text-xs text-muted-foreground">标注员：{t.annotators.map(a => a.userPid).join(", ")} · 审核员：{t.reviewers.join(", ")}</div>
                   </div>
                 </div>
                 <div className="flex gap-2">
                   <Button size="sm" variant="outline" onClick={() => setEditing(t.id)}>编辑</Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={pendingCount === 0}
+                    onClick={() => { setTaskRejectId(t.id); setTaskRejectReason(""); }}
+                    title="将该任务下所有待审标注一次性打回"
+                  >
+                    整体打回 ({pendingCount})
+                  </Button>
                   <Button size="sm" variant="destructive" onClick={() => del(t.id)}>删除</Button>
                 </div>
               </div>
               <div className="mt-3 space-y-1">
-                <div className="text-xs font-medium">已提交标注（可强制打回）：</div>
-                {db.annotations.filter((a) => a.taskId === t.id).slice(0, 5).map((a) => (
+                <div className="text-xs font-medium">标注列表（勾选后点击顶部"批量打回标注"）：</div>
+                {taskAnnos.slice(0, 10).map((a) => (
                   <div key={a.id} className="text-xs flex items-center gap-2 border-t pt-1">
+                    <input
+                      type="checkbox"
+                      disabled={!["submitted", "approved"].includes(a.status)}
+                      checked={selectedAnnos.has(a.id)}
+                      onChange={(e) => {
+                        const s = new Set(selectedAnnos);
+                        if (e.target.checked) s.add(a.id); else s.delete(a.id);
+                        setSelectedAnnos(s);
+                      }}
+                    />
                     <span>{a.styleId}</span><span>{PERSPECTIVE_LABEL[a.perspective]}</span><span>[{a.status}]</span>
                     {a.status !== "rejected" && <Button size="sm" variant="ghost" className="h-6" onClick={() => forceReject(a.id)}>强制打回</Button>}
                   </div>
                 ))}
+                {taskAnnos.length === 0 && <div className="text-xs text-muted-foreground">暂无标注</div>}
               </div>
             </Card>
           );
@@ -534,6 +605,42 @@ export function AdminTasks() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setBatchOpen(false)}>取消</Button>
             <Button onClick={applyBatch}>应用</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={batchRejectOpen} onOpenChange={setBatchRejectOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>批量打回 {selectedAnnos.size} 条标注</DialogTitle></DialogHeader>
+          <div className="space-y-2">
+            <Field label="打回原因" required help="将统一写入所有选中标注的审核备注，并出现在版本历史中">
+              <Textarea rows={4} value={batchRejectReason} onChange={(e) => setBatchRejectReason(e.target.value)} placeholder="例如：领型与图片不一致，请重新检查并修改" />
+            </Field>
+            <div className="text-xs text-muted-foreground">仅状态为「submitted / approved」的标注会被改为 rejected。</div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBatchRejectOpen(false)}>取消</Button>
+            <Button variant="destructive" onClick={() => { if (confirm(`确认批量打回 ${selectedAnnos.size} 条？`)) applyBatchReject(); }}>确认打回</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!taskRejectId} onOpenChange={(o) => { if (!o) setTaskRejectId(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>任务整体打回</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            <div className="text-sm text-muted-foreground">
+              将把 <span className="font-semibold text-foreground">{db.tasks.find(t => t.id === taskRejectId)?.name}</span> 下所有「待审核」标注一次性打回给标注员重做。
+            </div>
+            <Field label="打回原因" required help="原因将写入每条标注的审核备注与版本历史">
+              <Textarea rows={4} value={taskRejectReason} onChange={(e) => setTaskRejectReason(e.target.value)} placeholder="例如：批次整体不符合规范，需要重新标注" />
+            </Field>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTaskRejectId(null)}>取消</Button>
+            <Button variant="destructive" onClick={() => { if (confirm("确认对整个任务执行打回？")) applyTaskReject(); }}>确认打回</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
