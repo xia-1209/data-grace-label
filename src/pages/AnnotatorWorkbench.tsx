@@ -62,7 +62,7 @@ export default function AnnotatorWorkbench() {
   const [activeStyleId, setActiveStyleId] = useState<string | null>(null);
   const [imgIdx, setImgIdx] = useState(0);
   const [drafts, setDrafts] = useState<DraftMap>({});
-  const [showRules, setShowRules] = useState(false);
+  
   const [historyOpen, setHistoryOpen] = useState<Perspective | null>(null);
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(typeof window !== "undefined" && window.innerWidth < 1280);
