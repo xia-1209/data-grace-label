@@ -3,6 +3,7 @@ import { useDB } from "@/lib/useDB";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { PERSPECTIVES, PERSPECTIVE_LABEL, Perspective, Role, log, loadDB, saveDB, uid, resetDemo } from "@/lib/store";
 import { useAuth } from "@/lib/auth";
@@ -11,6 +12,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pi
 import * as XLSX from "xlsx";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
+import { Field, InfoIcon } from "@/components/FormField";
 
 const COLORS = ["#6366f1", "#a855f7", "#ec4899", "#f59e0b", "#10b981"];
 
@@ -346,16 +348,22 @@ function DatasetEditor({ id, onClose }: { id: string; onClose: () => void }) {
     <div className="p-6 max-w-5xl mx-auto space-y-4">
       <Button size="sm" variant="ghost" onClick={onClose}>← 返回</Button>
       <h1 className="text-2xl font-bold">{isNew ? "新建" : "编辑"}数据集</h1>
-      <div className="space-y-2">
-        <label className="text-sm">名称</label>
-        <Input value={name} onChange={(e) => setName(e.target.value)} />
-        <label className="text-sm">描述</label>
-        <Input value={desc} onChange={(e) => setDesc(e.target.value)} />
+      <div className="space-y-3">
+        <Field label="名称" required help="数据集的展示名称，会显示在任务管理与导出文件中">
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：2025春夏款式集" />
+        </Field>
+        <Field label="描述" help="可选，简述该数据集的内容、范围、来源">
+          <Input value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="例如：来自供应商A的50个款式，含正背两面图" />
+        </Field>
       </div>
 
       <Card className="p-4 space-y-2">
         <div className="flex items-center justify-between">
-          <h3 className="font-semibold">款式上传 (CSV/XLSX) {busy && <span className="text-xs text-primary ml-2">解析中…</span>}</h3>
+          <h3 className="font-semibold flex items-center gap-1">
+            款式上传 (CSV/XLSX)
+            <InfoIcon text="表格需包含列：style_id（款式编号）、image_url（图片地址）、angle（可选，角度）。相同 style_id 的多行会归并为一个款式的多张图。" />
+            {busy && <span className="text-xs text-primary ml-2">解析中…</span>}
+          </h3>
           <Button size="sm" variant="outline" onClick={downloadTemplate}>下载模板</Button>
         </div>
         <p className="text-xs text-muted-foreground">列：style_id, image_url, angle（可选）。同 style_id 的多行自动归为一个款式的多张图。</p>
@@ -364,7 +372,10 @@ function DatasetEditor({ id, onClose }: { id: string; onClose: () => void }) {
 
       <Card className="p-4 space-y-2">
         <div className="flex items-center justify-between">
-          <h3 className="font-semibold">预选标签上传 (CSV/XLSX)</h3>
+          <h3 className="font-semibold flex items-center gap-1">
+            预选标签上传 (CSV/XLSX)
+            <InfoIcon text="为指定款式的某个视角预填部分字段标签，标注员打开后可见。列：style_id、perspective、其它字段名（值用逗号分隔）。" />
+          </h3>
         </div>
         <p className="text-xs text-muted-foreground">列：style_id, perspective, 其他字段（多值用逗号分隔）。</p>
         <input type="file" accept=".csv,.xlsx" onChange={(e) => e.target.files?.[0] && handlePreselect(e.target.files[0])} />
@@ -412,6 +423,12 @@ export function AdminTasks() {
   const [batchAnnotator, setBatchAnnotator] = useState("");
   const [batchReviewer, setBatchReviewer] = useState("");
 
+  const [selectedAnnos, setSelectedAnnos] = useState<Set<string>>(new Set());
+  const [batchRejectOpen, setBatchRejectOpen] = useState(false);
+  const [batchRejectReason, setBatchRejectReason] = useState("");
+  const [taskRejectId, setTaskRejectId] = useState<string | null>(null);
+  const [taskRejectReason, setTaskRejectReason] = useState("");
+
   const filtered = db.tasks.filter((t) => t.name.toLowerCase().includes(search.toLowerCase()));
 
   const del = (id: string) => {
@@ -433,7 +450,49 @@ export function AdminTasks() {
     x.annotations[i].rejectReason = reason;
     x.annotations[i].history.push({ ts: Date.now(), status: "rejected", by: "admin", reason });
     saveDB(x);
+    log("force_reject", "admin", `${x.annotations[i].styleId}: ${reason}`);
     toast.success("已强制打回");
+  };
+
+  const applyBatchReject = () => {
+    if (!batchRejectReason.trim()) { toast.error("请填写打回原因"); return; }
+    const x = loadDB();
+    let n = 0;
+    selectedAnnos.forEach((id) => {
+      const i = x.annotations.findIndex((a) => a.id === id);
+      if (i < 0) return;
+      const a = x.annotations[i];
+      if (!["submitted", "approved"].includes(a.status)) return;
+      a.status = "rejected";
+      a.rejectReason = batchRejectReason;
+      a.history.push({ ts: Date.now(), status: "rejected", by: "admin", reason: batchRejectReason });
+      n++;
+    });
+    saveDB(x);
+    log("batch_reject", "admin", `${n} 条：${batchRejectReason}`);
+    toast.success(`已批量打回 ${n} 条`);
+    setSelectedAnnos(new Set());
+    setBatchRejectOpen(false);
+    setBatchRejectReason("");
+  };
+
+  const applyTaskReject = () => {
+    if (!taskRejectId || !taskRejectReason.trim()) { toast.error("请填写打回原因"); return; }
+    const x = loadDB();
+    let n = 0;
+    x.annotations.forEach((a) => {
+      if (a.taskId !== taskRejectId) return;
+      if (a.status !== "submitted") return;
+      a.status = "rejected";
+      a.rejectReason = taskRejectReason;
+      a.history.push({ ts: Date.now(), status: "rejected", by: "admin", reason: taskRejectReason });
+      n++;
+    });
+    saveDB(x);
+    log("task_batch_reject", "admin", `task=${taskRejectId} ${n} 条：${taskRejectReason}`);
+    toast.success(`任务整体打回完成（${n} 条）`);
+    setTaskRejectId(null);
+    setTaskRejectReason("");
   };
 
   const applyBatch = () => {
@@ -463,6 +522,7 @@ export function AdminTasks() {
         <div className="flex gap-2">
           <Input placeholder="搜索任务…" value={search} onChange={(e) => setSearch(e.target.value)} className="w-48" />
           {selected.size > 0 && <Button size="sm" variant="outline" onClick={() => setBatchOpen(true)}>批量分配 ({selected.size})</Button>}
+          {selectedAnnos.size > 0 && <Button size="sm" variant="destructive" onClick={() => setBatchRejectOpen(true)}>批量打回标注 ({selectedAnnos.size})</Button>}
           <Button onClick={() => setEditing("__new")}>新建任务</Button>
         </div>
       </div>
@@ -471,6 +531,8 @@ export function AdminTasks() {
           const ds = db.datasets.find((d) => d.id === t.datasetId);
           const total = (ds?.styles.length || 0);
           const submitted = db.annotations.filter((a) => a.taskId === t.id && ["submitted", "approved"].includes(a.status)).length;
+          const taskAnnos = db.annotations.filter((a) => a.taskId === t.id);
+          const pendingCount = taskAnnos.filter((a) => a.status === "submitted").length;
           return (
             <Card key={t.id} className="p-4">
               <div className="flex justify-between gap-2">
@@ -483,23 +545,43 @@ export function AdminTasks() {
                   <div>
                     <div className="font-semibold">{t.name}</div>
                     <div className="text-xs text-muted-foreground">数据集：{ds?.name} · 截止 {t.deadline}</div>
-                    <div className="text-xs">进度 {submitted}/{total}</div>
+                    <div className="text-xs">进度 {submitted}/{total} · 待审 {pendingCount}</div>
                     <div className="text-xs text-muted-foreground">标注员：{t.annotators.map(a => a.userPid).join(", ")} · 审核员：{t.reviewers.join(", ")}</div>
                   </div>
                 </div>
                 <div className="flex gap-2">
                   <Button size="sm" variant="outline" onClick={() => setEditing(t.id)}>编辑</Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={pendingCount === 0}
+                    onClick={() => { setTaskRejectId(t.id); setTaskRejectReason(""); }}
+                    title="将该任务下所有待审标注一次性打回"
+                  >
+                    整体打回 ({pendingCount})
+                  </Button>
                   <Button size="sm" variant="destructive" onClick={() => del(t.id)}>删除</Button>
                 </div>
               </div>
               <div className="mt-3 space-y-1">
-                <div className="text-xs font-medium">已提交标注（可强制打回）：</div>
-                {db.annotations.filter((a) => a.taskId === t.id).slice(0, 5).map((a) => (
+                <div className="text-xs font-medium">标注列表（勾选后点击顶部"批量打回标注"）：</div>
+                {taskAnnos.slice(0, 10).map((a) => (
                   <div key={a.id} className="text-xs flex items-center gap-2 border-t pt-1">
+                    <input
+                      type="checkbox"
+                      disabled={!["submitted", "approved"].includes(a.status)}
+                      checked={selectedAnnos.has(a.id)}
+                      onChange={(e) => {
+                        const s = new Set(selectedAnnos);
+                        if (e.target.checked) s.add(a.id); else s.delete(a.id);
+                        setSelectedAnnos(s);
+                      }}
+                    />
                     <span>{a.styleId}</span><span>{PERSPECTIVE_LABEL[a.perspective]}</span><span>[{a.status}]</span>
                     {a.status !== "rejected" && <Button size="sm" variant="ghost" className="h-6" onClick={() => forceReject(a.id)}>强制打回</Button>}
                   </div>
                 ))}
+                {taskAnnos.length === 0 && <div className="text-xs text-muted-foreground">暂无标注</div>}
               </div>
             </Card>
           );
@@ -523,6 +605,42 @@ export function AdminTasks() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setBatchOpen(false)}>取消</Button>
             <Button onClick={applyBatch}>应用</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={batchRejectOpen} onOpenChange={setBatchRejectOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>批量打回 {selectedAnnos.size} 条标注</DialogTitle></DialogHeader>
+          <div className="space-y-2">
+            <Field label="打回原因" required help="将统一写入所有选中标注的审核备注，并出现在版本历史中">
+              <Textarea rows={4} value={batchRejectReason} onChange={(e) => setBatchRejectReason(e.target.value)} placeholder="例如：领型与图片不一致，请重新检查并修改" />
+            </Field>
+            <div className="text-xs text-muted-foreground">仅状态为「submitted / approved」的标注会被改为 rejected。</div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBatchRejectOpen(false)}>取消</Button>
+            <Button variant="destructive" onClick={() => { if (confirm(`确认批量打回 ${selectedAnnos.size} 条？`)) applyBatchReject(); }}>确认打回</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!taskRejectId} onOpenChange={(o) => { if (!o) setTaskRejectId(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>任务整体打回</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            <div className="text-sm text-muted-foreground">
+              将把 <span className="font-semibold text-foreground">{db.tasks.find(t => t.id === taskRejectId)?.name}</span> 下所有「待审核」标注一次性打回给标注员重做。
+            </div>
+            <Field label="打回原因" required help="原因将写入每条标注的审核备注与版本历史">
+              <Textarea rows={4} value={taskRejectReason} onChange={(e) => setTaskRejectReason(e.target.value)} placeholder="例如：批次整体不符合规范，需要重新标注" />
+            </Field>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTaskRejectId(null)}>取消</Button>
+            <Button variant="destructive" onClick={() => { if (confirm("确认对整个任务执行打回？")) applyTaskReject(); }}>确认打回</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -559,19 +677,36 @@ function TaskEditor({ id, onClose }: { id: string; onClose: () => void }) {
   };
 
   return (
-    <div className="p-6 max-w-3xl mx-auto space-y-3">
+    <div className="p-6 max-w-3xl mx-auto space-y-4">
       <Button size="sm" variant="ghost" onClick={onClose}>← 返回</Button>
       <h1 className="text-2xl font-bold">{isNew ? "新建" : "编辑"}任务</h1>
-      <Input placeholder="任务名称" value={name} onChange={(e) => setName(e.target.value)} />
-      <select className="border rounded px-2 py-2 w-full" value={datasetId} onChange={(e) => setDatasetId(e.target.value)}>
-        {db.datasets.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-      </select>
-      <select className="border rounded px-2 py-2 w-full" value={libraryKey} onChange={(e) => setLib(e.target.value)}>
-        {db.libraries.map((l) => <option key={l.key} value={l.key}>{l.name}</option>)}
-      </select>
-      <Input type="date" value={deadline} onChange={(e) => setDl(e.target.value)} />
-      <Card className="p-3">
-        <div className="font-medium mb-2">标注员（含视角权限）</div>
+
+      <Field label="任务名称" required help="任务包的展示名称，会显示在标注员/审核员的任务列表中">
+        <Input placeholder="例如：第一阶段款式库标注" value={name} onChange={(e) => setName(e.target.value)} />
+      </Field>
+
+      <Field label="选择数据集" required help="任务包绑定的款式/面料/部件数据来源">
+        <select className="border rounded px-2 py-2 w-full" value={datasetId} onChange={(e) => setDatasetId(e.target.value)}>
+          {db.datasets.map((d) => <option key={d.id} value={d.id}>{d.name}（{d.styles.length} 条）</option>)}
+        </select>
+      </Field>
+
+      <Field label="所属库" required help="决定标注表单中渲染哪些字段（款式库/面料库/部件库...）">
+        <select className="border rounded px-2 py-2 w-full" value={libraryKey} onChange={(e) => setLib(e.target.value)}>
+          {db.libraries.map((l) => <option key={l.key} value={l.key}>{l.name}</option>)}
+        </select>
+      </Field>
+
+      <Field label="截止日期" help="到期后任务仍可标注，但会在仪表盘标红">
+        <Input type="date" value={deadline} onChange={(e) => setDl(e.target.value)} />
+      </Field>
+
+      <Card className="p-3 space-y-2">
+        <div className="font-medium flex items-center gap-1">
+          分配标注员
+          <InfoIcon text="勾选后可进一步选择该标注员在本任务中可编辑的视角（生产/商业ToB/商业ToC）。只展示角色包含 annotator 的用户。" />
+        </div>
+        <div className="text-xs text-muted-foreground">"可编辑视角"决定该标注员在打开任务时能编辑哪些表单视角。</div>
         {db.users.filter((u) => u.roles.includes("annotator")).map((u) => {
           const sel = annotators.find((a) => a.userPid === u.pid);
           return (
@@ -582,6 +717,7 @@ function TaskEditor({ id, onClose }: { id: string; onClose: () => void }) {
               </label>
               {sel && (
                 <div className="ml-6 flex gap-3 mt-1">
+                  <span className="text-xs text-muted-foreground">可编辑视角：</span>
                   {PERSPECTIVES.map((p) => (
                     <label key={p} className="text-xs flex items-center gap-1">
                       <input type="checkbox" checked={sel.perspectives.includes(p)} onChange={() => togglePerspective(u.pid, p)} />
@@ -594,8 +730,12 @@ function TaskEditor({ id, onClose }: { id: string; onClose: () => void }) {
           );
         })}
       </Card>
-      <Card className="p-3">
-        <div className="font-medium mb-2">审核员</div>
+
+      <Card className="p-3 space-y-2">
+        <div className="font-medium flex items-center gap-1">
+          分配审核员
+          <InfoIcon text="只展示角色包含 reviewer 的用户。审核员可以通过/打回该任务下的标注。" />
+        </div>
         {db.users.filter((u) => u.roles.includes("reviewer")).map((u) => (
           <label key={u.pid} className="flex items-center gap-2">
             <input type="checkbox" checked={reviewers.includes(u.pid)} onChange={() => setRev((r) => r.includes(u.pid) ? r.filter((x) => x !== u.pid) : [...r, u.pid])} />
@@ -603,7 +743,8 @@ function TaskEditor({ id, onClose }: { id: string; onClose: () => void }) {
           </label>
         ))}
       </Card>
-      <Button onClick={save}>保存</Button>
+
+      <Button onClick={() => { if (!name.trim()) { toast.error("请填写任务名称"); return; } save(); }}>保存</Button>
     </div>
   );
 }
@@ -658,13 +799,18 @@ export function AdminUsers() {
         ))}
       </div>
       {editing && (
-        <Card className="p-4 mt-4 space-y-2">
+        <Card className="p-4 mt-4 space-y-3">
           <h3 className="font-semibold">{editing.__new ? "新建" : "编辑"}用户</h3>
-          <Input placeholder="PID" value={editing.pid} onChange={(e) => setEditing({ ...editing, pid: e.target.value })} disabled={!editing.__new} />
-          <Input placeholder="用户名" value={editing.username} onChange={(e) => setEditing({ ...editing, username: e.target.value })} />
-          <Input placeholder="密码" value={editing.password} onChange={(e) => setEditing({ ...editing, password: e.target.value })} />
-          <div>
-            <div className="text-sm mb-1">角色（可多选）</div>
+          <Field label="PID" required help="用户唯一编号，创建后不可修改">
+            <Input placeholder="如 P007" value={editing.pid} onChange={(e) => setEditing({ ...editing, pid: e.target.value })} disabled={!editing.__new} />
+          </Field>
+          <Field label="用户名" required help="登录用，唯一">
+            <Input placeholder="如 zhang_san" value={editing.username} onChange={(e) => setEditing({ ...editing, username: e.target.value })} />
+          </Field>
+          <Field label="密码" required help="演示环境明文存储，请勿用于生产">
+            <Input placeholder="登录密码" value={editing.password} onChange={(e) => setEditing({ ...editing, password: e.target.value })} />
+          </Field>
+          <Field label="角色（可多选）" required help="一个用户可以同时拥有多个角色，登录后可在右上角切换当前活跃角色。">
             <div className="flex gap-4">
               {ALL_ROLES.map((r) => (
                 <label key={r} className="text-sm flex items-center gap-1">
@@ -673,7 +819,7 @@ export function AdminUsers() {
                 </label>
               ))}
             </div>
-          </div>
+          </Field>
           <div className="flex gap-2">
             <Button onClick={() => { if (!editing.roles?.length) { toast.error("至少选择一个角色"); return; } save(); }}>保存</Button>
             <Button variant="outline" onClick={() => setEditing(null)}>取消</Button>
@@ -786,23 +932,32 @@ export function AdminRules() {
         ))}
       </div>
       {editing && (
-        <Card className="p-4 mt-4 space-y-2">
+        <Card className="p-4 mt-4 space-y-3">
           <h3 className="font-semibold">规则编辑</h3>
-          <select className="border rounded px-2 py-2 w-full text-sm" value={editing.libraryKey} onChange={(e) => setEditing({ ...editing, libraryKey: e.target.value, fieldKey: "" })}>
-            {db.libraries.map((l) => <option key={l.key} value={l.key}>{l.name}</option>)}
-          </select>
-          <select className="border rounded px-2 py-2 w-full text-sm" value={editing.fieldKey} onChange={(e) => setEditing({ ...editing, fieldKey: e.target.value, optionValue: "" })}>
-            <option value="">选择字段</option>
-            {curLib?.fields.filter((f) => f.type !== "text").map((f) => <option key={f.key} value={f.key}>{f.label} ({f.key})</option>)}
-          </select>
-          <select className="border rounded px-2 py-2 w-full text-sm" value={editing.optionValue} onChange={(e) => setEditing({ ...editing, optionValue: e.target.value })}>
-            <option value="">选择标签值</option>
-            {curField?.options.map((o) => <option key={o} value={o}>{o}</option>)}
-          </select>
-          <Input placeholder="定义" value={editing.definition} onChange={(e) => setEditing({ ...editing, definition: e.target.value })} />
-          <Input placeholder="判断标准" value={editing.criteria} onChange={(e) => setEditing({ ...editing, criteria: e.target.value })} />
-          <div>
-            <div className="text-xs mb-1">互斥标签（同字段）：</div>
+          <Field label="所属库" required help="规则归属的库">
+            <select className="border rounded px-2 py-2 w-full text-sm" value={editing.libraryKey} onChange={(e) => setEditing({ ...editing, libraryKey: e.target.value, fieldKey: "" })}>
+              {db.libraries.map((l) => <option key={l.key} value={l.key}>{l.name}</option>)}
+            </select>
+          </Field>
+          <Field label="字段" required help="规则约束的字段（仅可选择有固定选项的字段）">
+            <select className="border rounded px-2 py-2 w-full text-sm" value={editing.fieldKey} onChange={(e) => setEditing({ ...editing, fieldKey: e.target.value, optionValue: "" })}>
+              <option value="">选择字段</option>
+              {curLib?.fields.filter((f) => f.type !== "text").map((f) => <option key={f.key} value={f.key}>{f.label} ({f.key})</option>)}
+            </select>
+          </Field>
+          <Field label="标签值" required help="规则针对的具体标签选项">
+            <select className="border rounded px-2 py-2 w-full text-sm" value={editing.optionValue} onChange={(e) => setEditing({ ...editing, optionValue: e.target.value })}>
+              <option value="">选择标签值</option>
+              {curField?.options.map((o) => <option key={o} value={o}>{o}</option>)}
+            </select>
+          </Field>
+          <Field label="定义" help="标签本身的含义描述，会显示在标注员的规则浮层中">
+            <Input placeholder="例如：领口呈 V 字形，前中开口" value={editing.definition} onChange={(e) => setEditing({ ...editing, definition: e.target.value })} />
+          </Field>
+          <Field label="判断标准" help="标注员判断该标签是否适用时遵循的可操作规则（可写多条，建议用分号分隔）">
+            <Input placeholder="例如：开口角度 30°~90°；前中点低于锁骨" value={editing.criteria} onChange={(e) => setEditing({ ...editing, criteria: e.target.value })} />
+          </Field>
+          <Field label="互斥标签（同字段）" help="勾选后，标注时若选了本标签，这些标签不可同时被选">
             <div className="flex flex-wrap gap-1">
               {curField?.options.filter((o) => o !== editing.optionValue).map((o) => (
                 <label key={o} className="text-xs border rounded px-2 py-1 flex items-center gap-1">
@@ -813,11 +968,13 @@ export function AdminRules() {
                 </label>
               ))}
             </div>
-          </div>
-          <Input placeholder='依赖条件 e.g. category == "连衣裙"' value={editing.dependency} onChange={(e) => setEditing({ ...editing, dependency: e.target.value })} />
+          </Field>
+          <Field label="依赖表达式" help={`仅当其它字段满足该条件时，本标签才可用。示例：category == "连衣裙"；多条件用 && 连接。`}>
+            <Input placeholder='例如：category == "连衣裙"' value={editing.dependency} onChange={(e) => setEditing({ ...editing, dependency: e.target.value })} />
+          </Field>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={editing.notRecommended} onChange={(e) => setEditing({ ...editing, notRecommended: e.target.checked })} />
-            默认不推荐
+            默认不推荐 <InfoIcon text="开启后该标签会标红/置灰提示标注员谨慎选择" />
           </label>
           <div>
             <div className="text-xs mb-1">正例图（最多3张）：</div>
@@ -1115,10 +1272,12 @@ export function AdminTagPool() {
               </label>
               <Button size="sm" variant="outline" disabled={mergeFrom.size < 2} onClick={() => setMergeOpen(true)}>合并 ({mergeFrom.size})</Button>
             </div>
-            <div className="flex gap-2">
-              <Input placeholder="新增标签名" value={newTag} onChange={(e) => setNewTag(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addTag()} className="h-8" />
-              <Button size="sm" onClick={addTag}>新增</Button>
-            </div>
+            <Field label="新增标签" help="直接添加到当前库/字段的固定选项池。回车快捷提交。">
+              <div className="flex gap-2">
+                <Input placeholder="输入新标签名后回车或点击右侧按钮" value={newTag} onChange={(e) => setNewTag(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addTag()} className="h-8" />
+                <Button size="sm" onClick={addTag}>新增</Button>
+              </div>
+            </Field>
 
             <table className="w-full text-sm">
               <thead className="text-left text-xs text-muted-foreground border-b">
