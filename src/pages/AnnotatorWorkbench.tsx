@@ -135,7 +135,7 @@ export default function AnnotatorWorkbench() {
       if (!editablePerspectives.includes(p)) return;
       const draft = drafts[p];
       if (!draft) return;
-      const isEmpty = Object.keys(draft.data).length === 0 && draft.craftPartGroups.length === 0 && draft.customTags.length === 0;
+      const isEmpty = Object.keys(draft.data).length === 0 && draft.craftPartGroups.length === 0 && draft.relationGroups.length === 0 && draft.customTags.length === 0;
       if (status === "submitted" && isEmpty) return;
       if (status === "drafted" && isEmpty && !draft.dirty) return;
       const existing = getAnnotation(task.id, activeStyle.id, p);
@@ -148,12 +148,13 @@ export default function AnnotatorWorkbench() {
         status,
         data: draft.data,
         craftPartGroups: draft.craftPartGroups,
+        relationGroups: draft.relationGroups,
         customTags: draft.customTags,
         annotatorPid: user.pid,
         reviewerNotes: existing?.reviewerNotes || [],
         history: [...(existing?.history || []), {
           ts: Date.now(), status, by: user.pid,
-          data: draft.data, craftPartGroups: draft.craftPartGroups, customTags: draft.customTags,
+          data: draft.data, craftPartGroups: draft.craftPartGroups, relationGroups: draft.relationGroups, customTags: draft.customTags,
         }],
         updatedAt: Date.now(),
       };
