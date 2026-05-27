@@ -103,8 +103,8 @@ export default function AnnotatorWorkbench() {
       const a = getAnnotation(task.id, activeStyle.id, p);
       const preselect = activeStyle.preselect?.[p];
       next[p] = a
-        ? { data: a.data as Record<string, string[]>, craftPartGroups: a.craftPartGroups || [], customTags: a.customTags, dirty: false }
-        : { data: preselect ? { ...preselect } : {}, craftPartGroups: [], customTags: [], dirty: !!preselect };
+        ? { data: a.data as Record<string, string[]>, craftPartGroups: a.craftPartGroups || [], relationGroups: a.relationGroups || [], customTags: a.customTags, dirty: false }
+        : { data: preselect ? { ...preselect } : {}, craftPartGroups: [], relationGroups: [], customTags: [], dirty: !!preselect };
     });
     setDrafts(next);
     setImgIdx(0);
