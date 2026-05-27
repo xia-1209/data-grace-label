@@ -290,16 +290,20 @@ function seedDB(): DB {
       { key: "craft", label: "工艺类型", type: "multi", options: ["压褶", "印花", "绣花", "洗水"], allowCustom: true },
       { key: "part", label: "部位", type: "multi", options: ["前中部位", "前襟", "袖口", "下摆", "领口"], allowCustom: true },
     ],
-    craftPart: {
-      craftField: "craft",
-      partField: "part",
-      rules: {
-        压褶: ["前中部位", "前襟", "下摆"],
-        印花: ["前中部位", "袖口", "下摆", "领口"],
-        绣花: ["前中部位", "袖口", "领口"],
-        洗水: ["前中部位", "前襟", "袖口", "下摆", "领口"],
+    relations: [
+      {
+        relationId: "rel_craft_part",
+        fromField: "craft",
+        toField: "part",
+        mapping: {
+          压褶: ["前中部位", "前襟", "下摆"],
+          印花: ["前中部位", "袖口", "下摆", "领口"],
+          绣花: ["前中部位", "袖口", "领口"],
+          洗水: ["前中部位", "前襟", "袖口", "下摆", "领口"],
+        },
       },
-    },
+    ],
+    guidelines: "## 款式库标注规范\n\n- 每个款式包含多张图片（正面/背面/细节），所有视角共享一份标注。\n- **工艺-部位关联**：先选择工艺类型，再选择该工艺允许的部位。\n- 自定义标签仅在固定选项无法描述时使用，提交后进入审核流程。\n- 字段联动：依赖字段（如品类）变化会刷新关联字段（如领型）的可选项。",
   };
   const fabricLib: Library = {
     key: "fabric",
