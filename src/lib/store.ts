@@ -10,13 +10,13 @@ export const PERSPECTIVE_LABEL: Record<Perspective, string> = {
 };
 
 export type Role = "annotator" | "reviewer" | "admin";
+export const ALL_ROLES: Role[] = ["annotator", "reviewer", "admin"];
 
 export interface User {
   pid: string;
   username: string;
   password: string;
-  role: Role;
-  perspectives: Perspective[]; // editable perspectives
+  roles: Role[]; // a user can have multiple roles
 }
 
 export interface FieldDef {
