@@ -422,14 +422,6 @@ export default function AnnotatorWorkbench() {
                 )}
               </div>
               <div>
-                <div className="font-medium mb-1">参考图库</div>
-                <div className="grid grid-cols-2 gap-1">
-                  {dataset.styles.filter((s) => s.id !== activeStyle?.id).slice(0, 4).flatMap((s) => s.images.slice(0, 1)).map((im, i) => (
-                    <img key={i} src={im.url} className="w-full h-16 object-cover rounded cursor-zoom-in" onClick={() => window.open(im.url, "_blank")} alt="" />
-                  ))}
-                </div>
-              </div>
-              <div>
                 <div className="font-medium mb-1">本款式自定义标签</div>
                 <div className="flex flex-wrap gap-1">
                   {Object.values(drafts).flatMap((d) => d?.customTags || []).map((t, i) => (
