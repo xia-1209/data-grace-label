@@ -572,7 +572,7 @@ function TaskEditor({ id, onClose }: { id: string; onClose: () => void }) {
       <Input type="date" value={deadline} onChange={(e) => setDl(e.target.value)} />
       <Card className="p-3">
         <div className="font-medium mb-2">标注员（含视角权限）</div>
-        {db.users.filter((u) => u.role === "annotator").map((u) => {
+        {db.users.filter((u) => u.roles.includes("annotator")).map((u) => {
           const sel = annotators.find((a) => a.userPid === u.pid);
           return (
             <div key={u.pid} className="border-b py-2">
