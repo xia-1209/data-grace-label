@@ -176,7 +176,20 @@ export function loadDB(): DB {
     return db;
   }
   try {
-    return JSON.parse(raw);
+    const db = JSON.parse(raw) as DB;
+    // Migrate legacy users: { role, perspectives } -> { roles }
+    let changed = false;
+    db.users = (db.users || []).map((u: any) => {
+      if (!u.roles || !Array.isArray(u.roles)) {
+        changed = true;
+        const roles: Role[] = u.role ? [u.role as Role] : ["annotator"];
+        const { role, perspectives, ...rest } = u;
+        return { ...rest, roles };
+      }
+      return u;
+    });
+    if (changed) saveDB(db);
+    return db;
   } catch {
     const db = seedDB();
     saveDB(db);
