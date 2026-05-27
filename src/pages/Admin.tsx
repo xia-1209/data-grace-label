@@ -1272,10 +1272,12 @@ export function AdminTagPool() {
               </label>
               <Button size="sm" variant="outline" disabled={mergeFrom.size < 2} onClick={() => setMergeOpen(true)}>合并 ({mergeFrom.size})</Button>
             </div>
-            <div className="flex gap-2">
-              <Input placeholder="新增标签名" value={newTag} onChange={(e) => setNewTag(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addTag()} className="h-8" />
-              <Button size="sm" onClick={addTag}>新增</Button>
-            </div>
+            <Field label="新增标签" help="直接添加到当前库/字段的固定选项池。回车快捷提交。">
+              <div className="flex gap-2">
+                <Input placeholder="输入新标签名后回车或点击右侧按钮" value={newTag} onChange={(e) => setNewTag(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addTag()} className="h-8" />
+                <Button size="sm" onClick={addTag}>新增</Button>
+              </div>
+            </Field>
 
             <table className="w-full text-sm">
               <thead className="text-left text-xs text-muted-foreground border-b">
