@@ -448,17 +448,6 @@ export default function AnnotatorWorkbench() {
         <Button size="sm" onClick={() => saveAll("submitted")}>提交</Button>
       </div>
 
-      <Dialog open={showRules} onOpenChange={setShowRules}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>📘 标注规范</DialogTitle></DialogHeader>
-          <div className="text-sm space-y-2 max-h-96 overflow-auto">
-            <p>1. 每个款式包含多张图片（正面/背面/细节），所有视角共享一份标注。</p>
-            <p>2. 工艺-部位组：每个工艺允许的部位由库管理员维护。</p>
-            <p>3. 自定义标签：仅在固定选项无法描述时使用，提交后进入审核流程。</p>
-            <p>4. 字段联动：依赖字段（如品类）的变化会刷新关联字段（如领型）的可选项。</p>
-          </div>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={!!historyOpen} onOpenChange={(o) => !o && setHistoryOpen(null)}>
         <DialogContent className="max-w-2xl">
