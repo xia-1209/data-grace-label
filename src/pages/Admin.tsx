@@ -348,16 +348,22 @@ function DatasetEditor({ id, onClose }: { id: string; onClose: () => void }) {
     <div className="p-6 max-w-5xl mx-auto space-y-4">
       <Button size="sm" variant="ghost" onClick={onClose}>← 返回</Button>
       <h1 className="text-2xl font-bold">{isNew ? "新建" : "编辑"}数据集</h1>
-      <div className="space-y-2">
-        <label className="text-sm">名称</label>
-        <Input value={name} onChange={(e) => setName(e.target.value)} />
-        <label className="text-sm">描述</label>
-        <Input value={desc} onChange={(e) => setDesc(e.target.value)} />
+      <div className="space-y-3">
+        <Field label="名称" required help="数据集的展示名称，会显示在任务管理与导出文件中">
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：2025春夏款式集" />
+        </Field>
+        <Field label="描述" help="可选，简述该数据集的内容、范围、来源">
+          <Input value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="例如：来自供应商A的50个款式，含正背两面图" />
+        </Field>
       </div>
 
       <Card className="p-4 space-y-2">
         <div className="flex items-center justify-between">
-          <h3 className="font-semibold">款式上传 (CSV/XLSX) {busy && <span className="text-xs text-primary ml-2">解析中…</span>}</h3>
+          <h3 className="font-semibold flex items-center gap-1">
+            款式上传 (CSV/XLSX)
+            <InfoIcon text="表格需包含列：style_id（款式编号）、image_url（图片地址）、angle（可选，角度）。相同 style_id 的多行会归并为一个款式的多张图。" />
+            {busy && <span className="text-xs text-primary ml-2">解析中…</span>}
+          </h3>
           <Button size="sm" variant="outline" onClick={downloadTemplate}>下载模板</Button>
         </div>
         <p className="text-xs text-muted-foreground">列：style_id, image_url, angle（可选）。同 style_id 的多行自动归为一个款式的多张图。</p>
@@ -366,7 +372,10 @@ function DatasetEditor({ id, onClose }: { id: string; onClose: () => void }) {
 
       <Card className="p-4 space-y-2">
         <div className="flex items-center justify-between">
-          <h3 className="font-semibold">预选标签上传 (CSV/XLSX)</h3>
+          <h3 className="font-semibold flex items-center gap-1">
+            预选标签上传 (CSV/XLSX)
+            <InfoIcon text="为指定款式的某个视角预填部分字段标签，标注员打开后可见。列：style_id、perspective、其它字段名（值用逗号分隔）。" />
+          </h3>
         </div>
         <p className="text-xs text-muted-foreground">列：style_id, perspective, 其他字段（多值用逗号分隔）。</p>
         <input type="file" accept=".csv,.xlsx" onChange={(e) => e.target.files?.[0] && handlePreselect(e.target.files[0])} />
