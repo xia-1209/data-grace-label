@@ -15,17 +15,17 @@ import NotFound from "./pages/NotFound";
 const queryClient = new QueryClient();
 
 function Guard({ children, roles }: { children: React.ReactNode; roles?: string[] }) {
-  const { user } = useAuth();
+  const { user, activeRole } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
-  if (roles && !roles.includes(user.role)) return <Navigate to="/" replace />;
+  if (roles && (!activeRole || !roles.includes(activeRole))) return <Navigate to="/" replace />;
   return <>{children}</>;
 }
 
 function Home() {
-  const { user } = useAuth();
+  const { user, activeRole } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
-  if (user.role === "admin") return <Navigate to="/admin" replace />;
-  if (user.role === "reviewer") return <Navigate to="/reviewer" replace />;
+  if (activeRole === "admin") return <Navigate to="/admin" replace />;
+  if (activeRole === "reviewer") return <Navigate to="/reviewer" replace />;
   return <Navigate to="/annotator" replace />;
 }
 
