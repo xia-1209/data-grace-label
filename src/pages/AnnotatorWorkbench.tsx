@@ -669,61 +669,70 @@ function PerspectiveForm({
         );
       })}
 
-      {cp && (
-        <div className="border-t pt-4">
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-sm font-medium">工艺-部位组合</div>
-            {editable && (
-              <Button size="sm" variant="outline" onClick={() => onChange((d) => ({ ...d, craftPartGroups: [...d.craftPartGroups, { craft: "", parts: [] }] }))}>
-                <Plus className="w-3 h-3" />添加组
-              </Button>
-            )}
-          </div>
-          <div className="space-y-2">
-            {draft.craftPartGroups.map((g, gi) => {
-              const craftField = library.fields.find((f) => f.key === cp.craftField);
-              const allowed = cp.rules[g.craft] || [];
-              return (
-                <div key={gi} className="border rounded p-2 space-y-2 bg-muted/30">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs">工艺：</span>
-                    <select disabled={!editable} className="border rounded px-2 py-1 text-sm bg-background" value={g.craft}
-                      onChange={(e) => onChange((d) => {
-                        const arr = [...d.craftPartGroups];
-                        arr[gi] = { craft: e.target.value, parts: [] };
-                        return { ...d, craftPartGroups: arr };
-                      })}>
-                      <option value="">选择工艺</option>
-                      {craftField?.options.map((o) => <option key={o}>{o}</option>)}
-                    </select>
-                    {editable && (
-                      <Button size="icon" variant="ghost" onClick={() =>
-                        onChange((d) => ({ ...d, craftPartGroups: d.craftPartGroups.filter((_: any, i: number) => i !== gi) }))
-                      }><X className="w-3 h-3" /></Button>
-                    )}
+      {relations.map((rel) => {
+        const fromField = library.fields.find((f) => f.key === rel.fromField);
+        const toField = library.fields.find((f) => f.key === rel.toField);
+        if (!fromField || !toField) return null;
+        const groups = draft.relationGroups.filter((g) => g.relationId === rel.relationId);
+        return (
+          <div key={rel.relationId} className="border-t pt-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-sm font-medium">{fromField.label} → {toField.label}</div>
+              {editable && (
+                <Button size="sm" variant="outline" onClick={() => onChange((d) => ({
+                  ...d,
+                  relationGroups: [...d.relationGroups, { relationId: rel.relationId, from: "", to: [] }],
+                }))}>
+                  <Plus className="w-3 h-3" />添加组
+                </Button>
+              )}
+            </div>
+            <div className="space-y-2">
+              {groups.map((g) => {
+                const absIdx = draft.relationGroups.indexOf(g);
+                const allowed = rel.mapping[g.from] || (g.from ? toField.options : []);
+                return (
+                  <div key={absIdx} className="border rounded p-2 space-y-2 bg-muted/30">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs">{fromField.label}：</span>
+                      <select disabled={!editable} className="border rounded px-2 py-1 text-sm bg-background" value={g.from}
+                        onChange={(e) => onChange((d) => {
+                          const arr = [...d.relationGroups];
+                          arr[absIdx] = { ...arr[absIdx], from: e.target.value, to: [] };
+                          return { ...d, relationGroups: arr };
+                        })}>
+                        <option value="">选择{fromField.label}</option>
+                        {fromField.options.map((o) => <option key={o}>{o}</option>)}
+                      </select>
+                      {editable && (
+                        <Button size="icon" variant="ghost" onClick={() =>
+                          onChange((d) => ({ ...d, relationGroups: d.relationGroups.filter((_: any, i: number) => i !== absIdx) }))
+                        }><X className="w-3 h-3" /></Button>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {allowed.map((p) => (
+                        <button key={p} disabled={!editable}
+                          onClick={() => onChange((d) => {
+                            const arr = [...d.relationGroups];
+                            const cur = arr[absIdx].to;
+                            arr[absIdx] = { ...arr[absIdx], to: cur.includes(p) ? cur.filter((x) => x !== p) : [...cur, p] };
+                            return { ...d, relationGroups: arr };
+                          })}
+                          className={`px-2 py-1 rounded border text-xs ${g.to.includes(p) ? "bg-accent text-accent-foreground border-accent" : ""}`}>
+                          {p}
+                        </button>
+                      ))}
+                      {g.from && allowed.length === 0 && <span className="text-xs text-muted-foreground">该{fromField.label}暂无可选{toField.label}</span>}
+                    </div>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    {allowed.map((p) => (
-                      <button key={p} disabled={!editable}
-                        onClick={() => onChange((d) => {
-                          const arr = [...d.craftPartGroups];
-                          const cur = arr[gi].parts;
-                          arr[gi] = { ...arr[gi], parts: cur.includes(p) ? cur.filter((x) => x !== p) : [...cur, p] };
-                          return { ...d, craftPartGroups: arr };
-                        })}
-                        className={`px-2 py-1 rounded border text-xs ${g.parts.includes(p) ? "bg-accent text-accent-foreground border-accent" : ""}`}>
-                        {p}
-                      </button>
-                    ))}
-                    {g.craft && allowed.length === 0 && <span className="text-xs text-muted-foreground">该工艺暂无可选部位</span>}
-                  </div>
-                </div>
-              );
-            })}
-            {draft.craftPartGroups.length === 0 && <div className="text-xs text-muted-foreground">尚未添加</div>}
+                );
+              })}
+              {groups.length === 0 && <div className="text-xs text-muted-foreground">尚未添加</div>}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })}
     </div>
   );
 }
