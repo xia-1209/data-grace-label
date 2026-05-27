@@ -177,8 +177,8 @@ export function loadDB(): DB {
   }
   try {
     const db = JSON.parse(raw) as DB;
-    // Migrate legacy users: { role, perspectives } -> { roles }
     let changed = false;
+    // Migrate legacy users: { role, perspectives } -> { roles }
     db.users = (db.users || []).map((u: any) => {
       if (!u.roles || !Array.isArray(u.roles)) {
         changed = true;
@@ -187,6 +187,17 @@ export function loadDB(): DB {
         return { ...rest, roles };
       }
       return u;
+    });
+    // Backfill missing demo multi-role users
+    const demoUsers: User[] = [
+      { pid: "P005", username: "lead", password: "123", roles: ["annotator", "reviewer"] },
+      { pid: "P006", username: "superadmin", password: "123", roles: ["admin", "reviewer", "annotator"] },
+    ];
+    demoUsers.forEach((du) => {
+      if (!db.users.find((u) => u.username === du.username)) {
+        db.users.push(du);
+        changed = true;
+      }
     });
     if (changed) saveDB(db);
     return db;
