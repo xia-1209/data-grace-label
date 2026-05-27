@@ -1006,73 +1006,172 @@ export function AdminRules() {
 export function AdminLibraries() {
   const db = useDB();
   const [libKey, setLibKey] = useState(db.libraries[0]?.key || "");
+  const [tab, setTab] = useState<"basic" | "fields" | "relations">("basic");
   const lib = db.libraries.find((l) => l.key === libKey);
 
-  const updateRule = (craft: string, parts: string[]) => {
+  const updateLib = (fn: (l: any) => void) => {
     const x = loadDB();
     const i = x.libraries.findIndex((l) => l.key === libKey);
-    if (i < 0 || !x.libraries[i].craftPart) return;
-    x.libraries[i].craftPart!.rules[craft] = parts;
+    if (i < 0) return;
+    fn(x.libraries[i]);
     saveDB(x);
   };
 
-  const importExcel = async (file: File) => {
+  // ---- relations management ----
+  const addRelation = (fromField: string, toField: string) => {
+    if (!fromField || !toField || fromField === toField) { toast.error("请选择不同的源/目标字段"); return; }
+    updateLib((l) => {
+      l.relations = l.relations || [];
+      if (l.relations.find((r: any) => r.fromField === fromField && r.toField === toField)) {
+        toast.error("该关联已存在"); return;
+      }
+      l.relations.push({ relationId: "rel_" + uid(), fromField, toField, mapping: {} });
+    });
+    toast.success("已添加关联");
+  };
+  const deleteRelation = (rid: string) => {
+    if (!confirm("删除该关联？")) return;
+    updateLib((l) => { l.relations = (l.relations || []).filter((r: any) => r.relationId !== rid); });
+  };
+  const updateMapping = (rid: string, fromValue: string, toValues: string[]) => {
+    updateLib((l) => {
+      const r = (l.relations || []).find((x: any) => x.relationId === rid);
+      if (r) r.mapping[fromValue] = toValues;
+    });
+  };
+  const importRelationExcel = async (rid: string, file: File) => {
     const buf = await file.arrayBuffer();
     const wb = XLSX.read(buf);
     const ws = wb.Sheets[wb.SheetNames[0]];
     const rows: any[] = XLSX.utils.sheet_to_json(ws);
-    const x = loadDB();
-    const i = x.libraries.findIndex((l) => l.key === libKey);
-    if (i < 0 || !x.libraries[i].craftPart) return;
-    rows.forEach((r) => {
-      x.libraries[i].craftPart!.rules[r.craft] = String(r.parts).split(",").map((s) => s.trim());
+    updateLib((l) => {
+      const r = (l.relations || []).find((x: any) => x.relationId === rid);
+      if (!r) return;
+      rows.forEach((row) => {
+        const k = String(row.from ?? row.源 ?? row[Object.keys(row)[0]] ?? "").trim();
+        const v = String(row.to ?? row.目标 ?? row[Object.keys(row)[1]] ?? "");
+        if (k) r.mapping[k] = v.split(/[,，;；]/).map((s) => s.trim()).filter(Boolean);
+      });
     });
-    saveDB(x);
-    toast.success(`导入 ${rows.length} 条`);
+    toast.success(`导入 ${rows.length} 条映射`);
   };
+
+  const [newFrom, setNewFrom] = useState("");
+  const [newTo, setNewTo] = useState("");
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-4">
       <h1 className="text-2xl font-bold">库管理</h1>
-      <select className="border rounded px-2 py-2" value={libKey} onChange={(e) => setLibKey(e.target.value)}>
-        {db.libraries.map((l) => <option key={l.key} value={l.key}>{l.name}</option>)}
-      </select>
-      {lib && (
-        <>
-          <Card className="p-4">
-            <h3 className="font-semibold mb-2">字段配置</h3>
-            <table className="w-full text-sm">
-              <thead className="text-left text-xs text-muted-foreground"><tr><th>key</th><th>label</th><th>类型</th><th>选项</th><th>自定义</th></tr></thead>
-              <tbody>
-                {lib.fields.map((f) => (
-                  <tr key={f.key} className="border-t"><td>{f.key}</td><td>{f.label}</td><td>{f.type}</td><td className="text-xs">{f.options.join(", ")}</td><td>{f.allowCustom ? "✓" : "—"}</td></tr>
-                ))}
-              </tbody>
-            </table>
+      <div className="flex items-center gap-3">
+        <select className="border rounded px-2 py-2" value={libKey} onChange={(e) => setLibKey(e.target.value)}>
+          {db.libraries.map((l) => <option key={l.key} value={l.key}>{l.name}</option>)}
+        </select>
+        <div className="flex gap-1 border rounded p-1">
+          {[
+            { k: "basic", label: "基本信息" },
+            { k: "fields", label: "字段配置" },
+            { k: "relations", label: "关联配置" },
+          ].map((t) => (
+            <button key={t.k} onClick={() => setTab(t.k as any)}
+              className={`px-3 py-1 text-sm rounded ${tab === t.k ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {lib && tab === "basic" && (
+        <Card className="p-4 space-y-3">
+          <Field label="库名称"><Input value={lib.name} onChange={(e) => updateLib((l) => { l.name = e.target.value; })} /></Field>
+          <Field label="标注规范" help="支持 Markdown，标注员/审核员在工作台辅助面板中查看" hint="例：## 标注要点\n- 颜色不超过 2 种\n- ...">
+            <Textarea rows={10} placeholder="填写本库的标注规范、判定要点、常见问题等…"
+              value={lib.guidelines || ""}
+              onChange={(e) => updateLib((l) => { l.guidelines = e.target.value; })} />
+          </Field>
+        </Card>
+      )}
+
+      {lib && tab === "fields" && (
+        <Card className="p-4">
+          <h3 className="font-semibold mb-2">字段配置</h3>
+          <table className="w-full text-sm">
+            <thead className="text-left text-xs text-muted-foreground"><tr><th>key</th><th>label</th><th>类型</th><th>选项</th><th>自定义</th></tr></thead>
+            <tbody>
+              {lib.fields.map((f) => (
+                <tr key={f.key} className="border-t"><td>{f.key}</td><td>{f.label}</td><td>{f.type}</td><td className="text-xs">{f.options.join(", ")}</td><td>{f.allowCustom ? "✓" : "—"}</td></tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="text-xs text-muted-foreground mt-2">字段的选项、自定义标签在"标签池管理"中维护。</p>
+        </Card>
+      )}
+
+      {lib && tab === "relations" && (
+        <div className="space-y-4">
+          <Card className="p-4 space-y-2">
+            <h3 className="font-semibold">新增关联</h3>
+            <div className="flex flex-wrap gap-2 items-end">
+              <Field label="源字段">
+                <select className="border rounded px-2 py-2 text-sm" value={newFrom} onChange={(e) => setNewFrom(e.target.value)}>
+                  <option value="">选择…</option>
+                  {lib.fields.filter((f) => f.type !== "text").map((f) => <option key={f.key} value={f.key}>{f.label} ({f.key})</option>)}
+                </select>
+              </Field>
+              <Field label="目标字段">
+                <select className="border rounded px-2 py-2 text-sm" value={newTo} onChange={(e) => setNewTo(e.target.value)}>
+                  <option value="">选择…</option>
+                  {lib.fields.filter((f) => f.type !== "text").map((f) => <option key={f.key} value={f.key}>{f.label} ({f.key})</option>)}
+                </select>
+              </Field>
+              <Button onClick={() => { addRelation(newFrom, newTo); setNewFrom(""); setNewTo(""); }}>添加关联</Button>
+            </div>
+            <p className="text-xs text-muted-foreground">配置后，标注员在工作台中可按"源字段值 → 目标字段值"的方式分组标注。</p>
           </Card>
-          {lib.craftPart && (
-            <Card className="p-4">
-              <h3 className="font-semibold mb-2">工艺-部位关联</h3>
-              <p className="text-xs text-muted-foreground">字段：{lib.craftPart.craftField} ↔ {lib.craftPart.partField}</p>
-              <input type="file" accept=".xlsx,.csv" onChange={(e) => e.target.files?.[0] && importExcel(e.target.files[0])} />
-              <table className="w-full text-sm mt-2">
-                <thead><tr><th className="text-left">工艺</th><th className="text-left">允许部位（逗号分隔）</th></tr></thead>
-                <tbody>
-                  {Object.entries(lib.craftPart.rules).map(([craft, parts]) => (
-                    <tr key={craft} className="border-t">
-                      <td className="py-1">{craft}</td>
-                      <td><Input defaultValue={parts.join(",")} onBlur={(e) => updateRule(craft, e.target.value.split(",").map((s) => s.trim()))} /></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </Card>
-          )}
-        </>
+
+          {(lib.relations || []).length === 0 && <p className="text-sm text-muted-foreground">暂无关联，添加后可在此编辑映射表。</p>}
+
+          {(lib.relations || []).map((r) => {
+            const fromField = lib.fields.find((f) => f.key === r.fromField);
+            const toField = lib.fields.find((f) => f.key === r.toField);
+            if (!fromField || !toField) {
+              return <Card key={r.relationId} className="p-4 text-sm text-destructive">关联 {r.relationId} 字段配置缺失</Card>;
+            }
+            return (
+              <Card key={r.relationId} className="p-4 space-y-2">
+                <div className="flex items-center gap-2">
+                  <h3 className="font-semibold">{fromField.label} → {toField.label}</h3>
+                  <span className="text-xs text-muted-foreground">{r.relationId}</span>
+                  <div className="ml-auto flex gap-2 items-center">
+                    <label className="text-xs cursor-pointer">
+                      <input type="file" accept=".xlsx,.csv" className="hidden"
+                        onChange={(e) => e.target.files?.[0] && importRelationExcel(r.relationId, e.target.files[0])} />
+                      <span className="px-2 py-1 border rounded hover:bg-muted">导入 Excel</span>
+                    </label>
+                    <Button variant="ghost" size="sm" onClick={() => deleteRelation(r.relationId)}>删除</Button>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">Excel 列名：from（源值）、to（目标值，多个用逗号分隔）</p>
+                <table className="w-full text-sm">
+                  <thead className="text-left text-xs text-muted-foreground"><tr><th className="py-1 w-1/3">{fromField.label}</th><th>允许的 {toField.label}（逗号分隔）</th></tr></thead>
+                  <tbody>
+                    {fromField.options.map((opt) => (
+                      <tr key={opt} className="border-t">
+                        <td className="py-1">{opt}</td>
+                        <td><Input defaultValue={(r.mapping[opt] || []).join(",")}
+                          onBlur={(e) => updateMapping(r.relationId, opt, e.target.value.split(",").map((s) => s.trim()).filter(Boolean))} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Card>
+            );
+          })}
+        </div>
       )}
     </div>
   );
 }
+
 
 // ---------------- Tag Pool ----------------
 export function AdminTagPool() {
