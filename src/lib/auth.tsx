@@ -1,40 +1,71 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { loadDB, User, log } from "./store";
+import { loadDB, User, Role, log } from "./store";
 
 interface AuthCtx {
   user: User | null;
-  login: (username: string, password: string, role: string) => string | null;
+  activeRole: Role | null;
+  setActiveRole: (r: Role) => void;
+  login: (username: string, password: string) => string | null;
   logout: () => void;
 }
 
-const Ctx = createContext<AuthCtx>({ user: null, login: () => null, logout: () => {} });
+const Ctx = createContext<AuthCtx>({
+  user: null,
+  activeRole: null,
+  setActiveRole: () => {},
+  login: () => null,
+  logout: () => {},
+});
 const KEY = "garment_anno_session";
 
+interface Session { user: User; activeRole: Role }
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(() => {
+  const [session, setSession] = useState<Session | null>(() => {
     const raw = localStorage.getItem(KEY);
-    return raw ? JSON.parse(raw) : null;
+    if (!raw) return null;
+    try {
+      const s = JSON.parse(raw);
+      // migrate legacy session shape
+      if (s.user && !s.user.roles && s.user.role) s.user.roles = [s.user.role];
+      if (s.user && !s.activeRole) s.activeRole = s.user.roles?.[0] || "annotator";
+      return s;
+    } catch { return null; }
   });
 
   useEffect(() => {
-    if (user) localStorage.setItem(KEY, JSON.stringify(user));
+    if (session) localStorage.setItem(KEY, JSON.stringify(session));
     else localStorage.removeItem(KEY);
-  }, [user]);
+  }, [session]);
 
-  const login = (username: string, password: string, role: string) => {
+  const login = (username: string, password: string) => {
     const db = loadDB();
-    const u = db.users.find((x) => x.username === username && x.password === password && x.role === role);
-    if (!u) return "用户名/密码/角色不匹配";
-    setUser(u);
+    const u = db.users.find((x) => x.username === username && x.password === password);
+    if (!u) return "用户名或密码错误";
+    if (!u.roles || u.roles.length === 0) return "该用户未分配角色";
+    setSession({ user: u, activeRole: u.roles[0] });
     log("login", u.pid);
     return null;
   };
   const logout = () => {
-    if (user) log("logout", user.pid);
-    setUser(null);
+    if (session?.user) log("logout", session.user.pid);
+    setSession(null);
+  };
+  const setActiveRole = (r: Role) => {
+    setSession((s) => (s && s.user.roles.includes(r) ? { ...s, activeRole: r } : s));
   };
 
-  return <Ctx.Provider value={{ user, login, logout }}>{children}</Ctx.Provider>;
+  return (
+    <Ctx.Provider value={{
+      user: session?.user || null,
+      activeRole: session?.activeRole || null,
+      setActiveRole,
+      login,
+      logout,
+    }}>
+      {children}
+    </Ctx.Provider>
+  );
 };
 
 export const useAuth = () => useContext(Ctx);

@@ -10,13 +10,13 @@ export const PERSPECTIVE_LABEL: Record<Perspective, string> = {
 };
 
 export type Role = "annotator" | "reviewer" | "admin";
+export const ALL_ROLES: Role[] = ["annotator", "reviewer", "admin"];
 
 export interface User {
   pid: string;
   username: string;
   password: string;
-  role: Role;
-  perspectives: Perspective[]; // editable perspectives
+  roles: Role[]; // a user can have multiple roles
 }
 
 export interface FieldDef {
@@ -176,7 +176,20 @@ export function loadDB(): DB {
     return db;
   }
   try {
-    return JSON.parse(raw);
+    const db = JSON.parse(raw) as DB;
+    // Migrate legacy users: { role, perspectives } -> { roles }
+    let changed = false;
+    db.users = (db.users || []).map((u: any) => {
+      if (!u.roles || !Array.isArray(u.roles)) {
+        changed = true;
+        const roles: Role[] = u.role ? [u.role as Role] : ["annotator"];
+        const { role, perspectives, ...rest } = u;
+        return { ...rest, roles };
+      }
+      return u;
+    });
+    if (changed) saveDB(db);
+    return db;
   } catch {
     const db = seedDB();
     saveDB(db);
@@ -314,10 +327,12 @@ function seedDB(): DB {
   };
 
   const users: User[] = [
-    { pid: "P001", username: "admin", password: "admin", role: "admin", perspectives: PERSPECTIVES },
-    { pid: "P002", username: "annotator1", password: "123", role: "annotator", perspectives: ["production_tob", "commercial_tob"] },
-    { pid: "P003", username: "annotator2", password: "123", role: "annotator", perspectives: ["commercial_toc"] },
-    { pid: "P004", username: "reviewer1", password: "123", role: "reviewer", perspectives: PERSPECTIVES },
+    { pid: "P001", username: "admin", password: "admin", roles: ["admin"] },
+    { pid: "P002", username: "annotator1", password: "123", roles: ["annotator"] },
+    { pid: "P003", username: "annotator2", password: "123", roles: ["annotator"] },
+    { pid: "P004", username: "reviewer1", password: "123", roles: ["reviewer"] },
+    { pid: "P005", username: "lead", password: "123", roles: ["annotator", "reviewer"] },
+    { pid: "P006", username: "superadmin", password: "123", roles: ["admin", "reviewer", "annotator"] },
   ];
 
   const styleTask: Task = {

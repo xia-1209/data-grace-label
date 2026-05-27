@@ -1,15 +1,21 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
-import { resetDemo } from "@/lib/store";
+import { resetDemo, Role } from "@/lib/store";
 import { toast } from "sonner";
 
+const ROLE_LABEL: Record<Role, string> = {
+  annotator: "标注员",
+  reviewer: "审核员",
+  admin: "管理员",
+};
+
 export default function Shell({ children }: { children: React.ReactNode }) {
-  const { user, logout } = useAuth();
+  const { user, activeRole, setActiveRole, logout } = useAuth();
   const nav = useNavigate();
   const loc = useLocation();
 
-  if (!user) return <>{children}</>;
+  if (!user || !activeRole) return <>{children}</>;
 
   const links: { to: string; label: string; roles: string[] }[] = [
     { to: "/annotator", label: "我的任务", roles: ["annotator"] },
@@ -22,7 +28,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     { to: "/admin/libraries", label: "库管理", roles: ["admin"] },
     { to: "/admin/tagpool", label: "标签池", roles: ["admin"] },
     { to: "/admin/logs", label: "操作日志", roles: ["admin"] },
-  ].filter((l) => l.roles.includes(user.role));
+  ].filter((l) => l.roles.includes(activeRole));
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
@@ -55,9 +61,25 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           >
             重置演示数据
           </Button>
+          {user.roles.length > 1 ? (
+            <select
+              className="border rounded px-2 py-1 text-sm"
+              value={activeRole}
+              onChange={(e) => {
+                const r = e.target.value as Role;
+                setActiveRole(r);
+                const target = r === "admin" ? "/admin" : r === "reviewer" ? "/reviewer" : "/annotator";
+                nav(target);
+              }}
+            >
+              {user.roles.map((r) => (
+                <option key={r} value={r}>{ROLE_LABEL[r]}</option>
+              ))}
+            </select>
+          ) : null}
           <div className="text-sm">
             <span className="font-medium">{user.username}</span>
-            <span className="text-muted-foreground ml-1">({user.role} · {user.pid})</span>
+            <span className="text-muted-foreground ml-1">({ROLE_LABEL[activeRole]} · {user.pid})</span>
           </div>
           <Button size="sm" variant="ghost" onClick={() => { logout(); nav("/login"); }}>登出</Button>
         </div>
