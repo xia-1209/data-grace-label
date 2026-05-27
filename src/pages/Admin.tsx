@@ -18,133 +18,188 @@ const COLORS = ["#6366f1", "#a855f7", "#ec4899", "#f59e0b", "#10b981"];
 
 export function AdminDashboard() {
   const db = useDB();
-  const totalTasks = db.tasks.length;
-  const totalStyles = db.datasets.reduce((n, d) => n + d.styles.length, 0);
+  const [libFilter, setLibFilter] = useState<string>("all");
+  const [restoreFile, setRestoreFile] = useState<File | null>(null);
+
+  // Apply library filter to scope all stats
+  const scopedTasks = libFilter === "all" ? db.tasks : db.tasks.filter((t) => t.libraryKey === libFilter);
+  const scopedTaskIds = new Set(scopedTasks.map((t) => t.id));
+  const scopedDatasetIds = new Set(scopedTasks.map((t) => t.datasetId));
+  const scopedDatasets = db.datasets.filter((d) => libFilter === "all" || scopedDatasetIds.has(d.id));
+  const scopedAnnos = db.annotations.filter((a) => libFilter === "all" || scopedTaskIds.has(a.taskId));
+
+  const totalTasks = scopedTasks.length;
+  const totalEntries = scopedDatasets.reduce((n, d) => n + d.styles.length, 0);
   const totalAnnotators = db.users.filter((u) => u.roles.includes("annotator")).length;
-  const submittedOrApproved = db.annotations.filter((a) => ["submitted", "approved"].includes(a.status)).length;
-  const totalSlots = db.tasks.reduce((n, t) => {
+  const submittedOrApproved = scopedAnnos.filter((a) => ["submitted", "approved"].includes(a.status)).length;
+  const totalSlots = scopedTasks.reduce((n, t) => {
     const ds = db.datasets.find((d) => d.id === t.datasetId);
     const persSet = new Set<string>();
     t.annotators.forEach((a) => a.perspectives.forEach((p) => persSet.add(p)));
     return n + (ds?.styles.length || 0) * persSet.size;
   }, 0);
   const completionRate = totalSlots ? Math.round((submittedOrApproved / totalSlots) * 100) : 0;
+  const pending = scopedAnnos.filter((a) => a.status === "submitted").length;
 
-  // 7-day submit trend
-  const trend = Array.from({ length: 7 }, (_, i) => {
-    const day = new Date(Date.now() - (6 - i) * 86400000);
-    const ds = day.toISOString().slice(0, 10);
-    const c = db.annotations.filter((a) =>
-      a.history.some((h) => h.status === "submitted" && new Date(h.ts).toISOString().slice(0, 10) === ds)
-    ).length || db.annotations.filter((a) => new Date(a.updatedAt).toISOString().slice(0, 10) === ds).length;
-    return { day: ds.slice(5), count: c };
-  });
-
-  // Reject rate per task
-  const rejectByTask = db.tasks.map((t) => {
-    const subs = db.annotations.filter((a) => a.taskId === t.id && ["submitted", "approved", "rejected"].includes(a.status)).length;
-    const rej = db.annotations.filter((a) => a.taskId === t.id && a.status === "rejected").length;
-    return { name: t.name.slice(0, 10), rate: subs ? Math.round((rej / subs) * 100) : 0 };
-  });
-
-  // Annotator workload
-  const workload = db.users.filter((u) => u.roles.includes("annotator")).map((u) => ({
-    name: u.username,
-    count: db.annotations.filter((a) => a.annotatorPid === u.pid && ["submitted", "approved"].includes(a.status)).length,
-  })).sort((a, b) => b.count - a.count);
-
-  // Tag heatmap top10
-  const tagDist: Record<string, number> = {};
-  db.annotations.forEach((a) => {
-    Object.values(a.data).forEach((vals) => {
-      (Array.isArray(vals) ? vals : [vals]).forEach((v) => {
-        if (v) tagDist[v as string] = (tagDist[v as string] || 0) + 1;
+  // Per task × annotator progress (submitted+approved / assigned slots)
+  const annotatorProgress: { name: string; done: number; total: number; ratio: number }[] = [];
+  scopedTasks.forEach((t) => {
+    const ds = db.datasets.find((d) => d.id === t.datasetId);
+    const styleCount = ds?.styles.length || 0;
+    t.annotators.forEach((asg) => {
+      const u = db.users.find((uu) => uu.pid === asg.userPid);
+      const total = styleCount * asg.perspectives.length;
+      const done = db.annotations.filter(
+        (a) => a.taskId === t.id && a.annotatorPid === asg.userPid && ["submitted", "approved"].includes(a.status)
+      ).length;
+      annotatorProgress.push({
+        name: `${t.name.slice(0, 8)}·${u?.username || asg.userPid}`,
+        done,
+        total,
+        ratio: total ? Math.round((done / total) * 100) : 0,
       });
     });
   });
-  const topTags = Object.entries(tagDist).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, value]) => ({ name, value }));
 
-  const restoreBackup = async (file: File) => {
-    if (!confirm("恢复将覆盖所有当前数据，确认？")) return;
-    const text = await file.text();
+  // Review progress per task: approved / submitted+approved
+  const reviewProgress = scopedTasks.map((t) => {
+    const submittedCnt = db.annotations.filter((a) => a.taskId === t.id && ["submitted", "approved", "rejected"].includes(a.status)).length;
+    const approvedCnt = db.annotations.filter((a) => a.taskId === t.id && a.status === "approved").length;
+    return {
+      name: t.name.slice(0, 12),
+      approved: approvedCnt,
+      total: submittedCnt,
+      ratio: submittedCnt ? Math.round((approvedCnt / submittedCnt) * 100) : 0,
+    };
+  });
+
+  const doRestore = async () => {
+    if (!restoreFile) return;
+    const text = await restoreFile.text();
     try {
       const data = JSON.parse(text);
-      localStorage.setItem("garment_anno_db_v2", JSON.stringify(data));
+      localStorage.setItem("garment_anno_db_v3_multilib", JSON.stringify(data));
       window.dispatchEvent(new CustomEvent("db-updated"));
       log("backup_restore", "admin");
       toast.success("已恢复");
-    } catch { toast.error("JSON 解析失败"); }
-  };
-
-  const filteredExport = () => {
-    const tag = prompt("按标签值过滤导出（留空导出全部）") || "";
-    const data = db.annotations.filter((a) =>
-      !tag || Object.values(a.data).some((vs) => (Array.isArray(vs) ? vs : [vs]).includes(tag))
-    );
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    saveAs(blob, `annotations_export.json`);
-    log("export_filtered", "admin", `tag=${tag}`);
+      setRestoreFile(null);
+      setTimeout(() => location.reload(), 400);
+    } catch {
+      toast.error("JSON 解析失败");
+      setRestoreFile(null);
+    }
   };
 
   return (
     <div className="p-6 space-y-4">
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center flex-wrap gap-2">
         <h1 className="text-2xl font-bold">仪表盘</h1>
-        <div className="flex gap-2">
-          <Button size="sm" variant="outline" onClick={filteredExport}>过滤导出 JSON</Button>
-          <Button size="sm" variant="outline" onClick={() => { adminBackupExport(); log("backup_export", "admin"); }}>导出全量备份</Button>
+        <div className="flex gap-2 items-center flex-wrap">
+          <div className="flex items-center gap-1">
+            <span className="text-sm text-muted-foreground">库类型筛选：</span>
+            <select
+              className="border rounded px-2 py-1.5 text-sm"
+              value={libFilter}
+              onChange={(e) => setLibFilter(e.target.value)}
+            >
+              <option value="all">全部</option>
+              {db.libraries.map((l) => (
+                <option key={l.key} value={l.key}>{l.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center gap-1">
+            <Button size="sm" variant="outline" onClick={() => { adminBackupExport(); log("backup_export", "admin"); }}>
+              备份导出
+            </Button>
+            <InfoIcon text="导出全部平台数据（JSON），用于数据迁移或定期备份。请谨慎保管备份文件。" />
+          </div>
           <label className="inline-flex">
-            <input type="file" accept=".json" className="hidden" onChange={(e) => e.target.files?.[0] && restoreBackup(e.target.files[0])} />
+            <input
+              type="file"
+              accept=".json"
+              className="hidden"
+              onChange={(e) => e.target.files?.[0] && setRestoreFile(e.target.files[0])}
+            />
             <span className="cursor-pointer text-sm border rounded px-3 py-1.5 hover:bg-muted">恢复备份</span>
           </label>
-          <Button size="sm" variant="destructive" onClick={() => { if (confirm("确定重置演示数据？")) { resetDemo(); toast.success("已重置"); } }}>重置演示数据</Button>
+          <Button
+            size="sm"
+            variant="destructive"
+            onClick={() => {
+              if (confirm("确定重置演示数据？所有改动将丢失。")) {
+                resetDemo();
+                toast.success("已重置");
+                setTimeout(() => location.reload(), 300);
+              }
+            }}
+          >
+            重置演示数据
+          </Button>
         </div>
       </div>
+
       <div className="grid grid-cols-5 gap-3">
         <StatCard label="任务包总数" v={totalTasks} />
-        <StatCard label="款式总数" v={totalStyles} />
+        <StatCard label="数据条目总数" v={totalEntries} />
         <StatCard label="标注员人数" v={totalAnnotators} />
         <StatCard label="完成率 %" v={completionRate} />
-        <StatCard label="待审核" v={db.annotations.filter((a) => a.status === "submitted").length} />
+        <StatCard label="待审核" v={pending} />
       </div>
-      <div className="grid grid-cols-2 gap-4">
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card className="p-4">
-          <h3 className="font-semibold mb-2">近一周提交趋势</h3>
-          <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={trend}>
-              <XAxis dataKey="day" /><YAxis allowDecimals={false} /><Tooltip />
-              <Line dataKey="count" stroke="hsl(var(--primary))" strokeWidth={2} />
-            </LineChart>
-          </ResponsiveContainer>
-        </Card>
-        <Card className="p-4">
-          <h3 className="font-semibold mb-2">各任务包打回率 (%)</h3>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={rejectByTask}>
-              <XAxis dataKey="name" /><YAxis /><Tooltip />
-              <Bar dataKey="rate" fill={COLORS[2]} />
+          <h3 className="font-semibold mb-2">各任务包人员打标进度（条数）</h3>
+          <ResponsiveContainer width="100%" height={Math.max(220, annotatorProgress.length * 32 + 40)}>
+            <BarChart data={annotatorProgress} layout="vertical" margin={{ left: 30 }}>
+              <XAxis type="number" allowDecimals={false} />
+              <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 11 }} />
+              <Tooltip
+                formatter={(val: number, key: string) => [val, key === "done" ? "已完成" : "总分配"]}
+              />
+              <Bar dataKey="total" fill={COLORS[3]} name="总分配" />
+              <Bar dataKey="done" fill={COLORS[0]} name="已完成" />
             </BarChart>
           </ResponsiveContainer>
+          {annotatorProgress.length === 0 && <div className="text-xs text-muted-foreground mt-2">当前筛选下暂无标注员分配</div>}
         </Card>
         <Card className="p-4">
-          <h3 className="font-semibold mb-2">标注员工作量</h3>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={workload}>
-              <XAxis dataKey="name" /><YAxis allowDecimals={false} /><Tooltip />
-              <Bar dataKey="count" fill={COLORS[0]} />
+          <h3 className="font-semibold mb-2">各任务包审核进度（已通过 / 已提交）</h3>
+          <ResponsiveContainer width="100%" height={Math.max(220, reviewProgress.length * 38 + 40)}>
+            <BarChart data={reviewProgress} layout="vertical" margin={{ left: 30 }}>
+              <XAxis type="number" allowDecimals={false} />
+              <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 11 }} />
+              <Tooltip
+                formatter={(val: number, key: string) => [val, key === "approved" ? "已通过" : "已提交"]}
+              />
+              <Bar dataKey="total" fill={COLORS[3]} name="已提交" />
+              <Bar dataKey="approved" fill={COLORS[4]} name="已通过" />
             </BarChart>
           </ResponsiveContainer>
-        </Card>
-        <Card className="p-4">
-          <h3 className="font-semibold mb-2">Top10 标签使用频率</h3>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={topTags} layout="vertical">
-              <XAxis type="number" /><YAxis type="category" dataKey="name" width={70} /><Tooltip />
-              <Bar dataKey="value" fill={COLORS[1]} />
-            </BarChart>
-          </ResponsiveContainer>
+          {reviewProgress.length === 0 && <div className="text-xs text-muted-foreground mt-2">当前筛选下暂无任务</div>}
         </Card>
       </div>
+
+      <Dialog open={!!restoreFile} onOpenChange={(o) => { if (!o) setRestoreFile(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>确认恢复备份？</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 text-sm">
+            <p>
+              即将从备份文件 <span className="font-medium">{restoreFile?.name}</span> 恢复平台数据。
+            </p>
+            <p className="text-destructive font-medium">
+              ⚠️ 此操作会<strong>完全覆盖</strong>当前所有数据（用户、数据集、任务、标注、规则等），无法撤销。
+            </p>
+            <p className="text-muted-foreground">建议先执行一次"备份导出"再继续。</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRestoreFile(null)}>取消</Button>
+            <Button variant="destructive" onClick={doRestore}>确认恢复</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
