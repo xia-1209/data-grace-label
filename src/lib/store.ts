@@ -32,16 +32,25 @@ export interface FieldDef {
 }
 
 export interface CraftPartConfig {
-  craftField: string; // field key
-  partField: string; // field key
-  rules: Record<string, string[]>; // craft option -> allowed parts
+  craftField: string;
+  partField: string;
+  rules: Record<string, string[]>;
+}
+
+export interface LibraryRelation {
+  relationId: string;
+  fromField: string;
+  toField: string;
+  mapping: Record<string, string[]>;
 }
 
 export interface Library {
   key: string;
   name: string;
   fields: FieldDef[];
-  craftPart?: CraftPartConfig;
+  craftPart?: CraftPartConfig; // legacy, auto-migrated
+  relations?: LibraryRelation[];
+  guidelines?: string;
 }
 
 export interface StyleImage {
