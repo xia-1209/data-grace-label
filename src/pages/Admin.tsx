@@ -149,14 +149,22 @@ export function AdminDashboard() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card className="p-4">
-          <h3 className="font-semibold mb-2">各任务包人员打标进度（条数）</h3>
-          <ResponsiveContainer width="100%" height={Math.max(220, annotatorProgress.length * 32 + 40)}>
+          <h3 className="font-semibold mb-1">各任务包人员打标进度（条数）</h3>
+          <p className="text-xs text-muted-foreground mb-2">
+            横轴为数据条目数量。每个标注员一行（格式：任务名·标注员PID）。
+            <span className="inline-block w-2 h-2 rounded-sm align-middle mx-1" style={{ background: COLORS[3] }} />
+            总分配 = 分配给该人的条目数；
+            <span className="inline-block w-2 h-2 rounded-sm align-middle mx-1" style={{ background: COLORS[0] }} />
+            已完成 = 已提交或已通过的条目数。两条并列对比可直观看出剩余工作量。
+          </p>
+          <ResponsiveContainer width="100%" height={Math.max(240, annotatorProgress.length * 36 + 60)}>
             <BarChart data={annotatorProgress} layout="vertical" margin={{ left: 30 }}>
               <XAxis type="number" allowDecimals={false} />
               <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 11 }} />
               <Tooltip
-                formatter={(val: number, key: string) => [val, key === "done" ? "已完成" : "总分配"]}
+                formatter={(val: number, key: string) => [val, key === "done" ? "已完成（已提交/已通过）" : "总分配"]}
               />
+              <Legend />
               <Bar dataKey="total" fill={COLORS[3]} name="总分配" />
               <Bar dataKey="done" fill={COLORS[0]} name="已完成" />
             </BarChart>
@@ -164,14 +172,22 @@ export function AdminDashboard() {
           {annotatorProgress.length === 0 && <div className="text-xs text-muted-foreground mt-2">当前筛选下暂无标注员分配</div>}
         </Card>
         <Card className="p-4">
-          <h3 className="font-semibold mb-2">各任务包审核进度（已通过 / 已提交）</h3>
-          <ResponsiveContainer width="100%" height={Math.max(220, reviewProgress.length * 38 + 40)}>
+          <h3 className="font-semibold mb-1">各任务包审核进度（已通过 / 已提交）</h3>
+          <p className="text-xs text-muted-foreground mb-2">
+            横轴为条目数量。每个任务包一行。
+            <span className="inline-block w-2 h-2 rounded-sm align-middle mx-1" style={{ background: COLORS[3] }} />
+            已提交 = 标注员提交进入审核的条目数；
+            <span className="inline-block w-2 h-2 rounded-sm align-middle mx-1" style={{ background: COLORS[4] }} />
+            已通过 = 审核员审核通过的条目数。
+          </p>
+          <ResponsiveContainer width="100%" height={Math.max(240, reviewProgress.length * 42 + 60)}>
             <BarChart data={reviewProgress} layout="vertical" margin={{ left: 30 }}>
               <XAxis type="number" allowDecimals={false} />
               <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 11 }} />
               <Tooltip
                 formatter={(val: number, key: string) => [val, key === "approved" ? "已通过" : "已提交"]}
               />
+              <Legend />
               <Bar dataKey="total" fill={COLORS[3]} name="已提交" />
               <Bar dataKey="approved" fill={COLORS[4]} name="已通过" />
             </BarChart>
