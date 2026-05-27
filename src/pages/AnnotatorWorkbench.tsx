@@ -62,7 +62,7 @@ export default function AnnotatorWorkbench() {
   const [activeStyleId, setActiveStyleId] = useState<string | null>(null);
   const [imgIdx, setImgIdx] = useState(0);
   const [drafts, setDrafts] = useState<DraftMap>({});
-  const [showRules, setShowRules] = useState(false);
+  
   const [historyOpen, setHistoryOpen] = useState<Perspective | null>(null);
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(typeof window !== "undefined" && window.innerWidth < 1280);
@@ -413,9 +413,14 @@ export default function AnnotatorWorkbench() {
             </div>
           ) : (
             <div className="p-3 space-y-3 text-sm">
-              <Button size="sm" variant="outline" className="w-full" onClick={() => setShowRules(true)}>
-                <BookOpen className="w-3 h-3" /> 标注规范
-              </Button>
+              <div>
+                <div className="font-medium mb-1 flex items-center gap-1"><BookOpen className="w-3 h-3" />库标注规范</div>
+                {library.guidelines ? (
+                  <div className="text-xs whitespace-pre-wrap text-muted-foreground bg-muted/40 rounded p-2 max-h-64 overflow-auto">{library.guidelines}</div>
+                ) : (
+                  <div className="text-xs text-muted-foreground">暂无标注规范</div>
+                )}
+              </div>
               <div>
                 <div className="font-medium mb-1">参考图库</div>
                 <div className="grid grid-cols-2 gap-1">
@@ -432,38 +437,6 @@ export default function AnnotatorWorkbench() {
                   ))}
                 </div>
               </div>
-              {library.guidelines ? (
-                <div>
-                  <div className="font-medium mb-1 flex items-center gap-1"><BookOpen className="w-3 h-3" />库标注规范</div>
-                  <div className="text-xs whitespace-pre-wrap text-muted-foreground bg-muted/40 rounded p-2 max-h-64 overflow-auto">{library.guidelines}</div>
-                </div>
-              ) : (
-                <div>
-                  <div className="font-medium mb-1 flex items-center gap-1"><BookOpen className="w-3 h-3" />库标注规范</div>
-                  <div className="text-xs text-muted-foreground">暂无标注规范</div>
-                </div>
-              )}
-              {(library.relations || []).length > 0 && (
-                <div>
-                  <div className="font-medium mb-1">字段关联参考</div>
-                  <div className="text-xs space-y-1 text-muted-foreground">
-                    {(library.relations || []).map((r) => {
-                      const ff = library.fields.find((f) => f.key === r.fromField);
-                      const tf = library.fields.find((f) => f.key === r.toField);
-                      return (
-                        <div key={r.relationId}>
-                          <b className="text-foreground">{ff?.label || r.fromField} → {tf?.label || r.toField}</b>
-                          <div className="pl-2 space-y-0.5">
-                            {Object.entries(r.mapping).slice(0, 6).map(([k, vs]) => (
-                              <div key={k}><span className="text-foreground">{k}</span>: {(vs as string[]).join(", ")}</div>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
             </div>
           )}
         </div>
@@ -475,17 +448,6 @@ export default function AnnotatorWorkbench() {
         <Button size="sm" onClick={() => saveAll("submitted")}>提交</Button>
       </div>
 
-      <Dialog open={showRules} onOpenChange={setShowRules}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>📘 标注规范</DialogTitle></DialogHeader>
-          <div className="text-sm space-y-2 max-h-96 overflow-auto">
-            <p>1. 每个款式包含多张图片（正面/背面/细节），所有视角共享一份标注。</p>
-            <p>2. 工艺-部位组：每个工艺允许的部位由库管理员维护。</p>
-            <p>3. 自定义标签：仅在固定选项无法描述时使用，提交后进入审核流程。</p>
-            <p>4. 字段联动：依赖字段（如品类）的变化会刷新关联字段（如领型）的可选项。</p>
-          </div>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={!!historyOpen} onOpenChange={(o) => !o && setHistoryOpen(null)}>
         <DialogContent className="max-w-2xl">
