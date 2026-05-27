@@ -46,7 +46,7 @@ export function AdminDashboard() {
   });
 
   // Annotator workload
-  const workload = db.users.filter((u) => u.role === "annotator").map((u) => ({
+  const workload = db.users.filter((u) => u.roles.includes("annotator")).map((u) => ({
     name: u.username,
     count: db.annotations.filter((a) => a.annotatorPid === u.pid && ["submitted", "approved"].includes(a.status)).length,
   })).sort((a, b) => b.count - a.count);
