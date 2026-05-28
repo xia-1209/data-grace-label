@@ -573,7 +573,7 @@ function PerspectiveForm({
   library, draft, editable, onChange,
 }: {
   library: ReturnType<typeof loadDB>["libraries"][number];
-  draft: { data: Record<string, string[]>; craftPartGroups: CraftPartGroup[]; relationGroups: RelationGroup[]; customTags: string[] };
+  draft: { data: Record<string, string[] | string>; craftPartGroups: CraftPartGroup[]; relationGroups: RelationGroup[]; customTags: string[] };
   editable: boolean;
   onChange: (fn: (d: any) => any) => void;
 }) {
