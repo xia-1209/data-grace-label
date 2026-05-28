@@ -10,6 +10,8 @@ import {
   PERSPECTIVES,
   PERSPECTIVE_LABEL,
   Perspective,
+  FIELD_LEVEL_LABEL,
+  FIELD_LEVEL_HINT,
   getAnnotation,
   loadDB,
   log,
@@ -17,6 +19,8 @@ import {
   uid,
   upsertAnnotation,
 } from "@/lib/store";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
