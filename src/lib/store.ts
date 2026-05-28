@@ -251,6 +251,33 @@ export function loadDB(): DB {
       });
       return l;
     });
+    // One-time demo: assign varied levels + add a top-tier field so users can preview UI
+    if (!localStorage.getItem("garment_anno_level_demo_v1")) {
+      const setLevel = (libKey: string, fieldKey: string, level: FieldLevel) => {
+        const lib = db.libraries.find((x) => x.key === libKey);
+        const f = lib?.fields.find((x) => x.key === fieldKey);
+        if (f) f.level = level;
+      };
+      const ensureTopField = (libKey: string, field: FieldDef) => {
+        const lib = db.libraries.find((x) => x.key === libKey);
+        if (lib && !lib.fields.find((x) => x.key === field.key)) lib.fields.push(field);
+      };
+      // 款式库
+      setLevel("style", "silhouette", "basic");
+      setLevel("style", "style", "middle");
+      ensureTopField("style", { key: "color_desc", label: "颜色描述", type: "text", options: [], level: "top", inputType: "single" });
+      // 面料库
+      setLevel("fabric", "composition", "basic");
+      setLevel("fabric", "hand_feel", "middle");
+      ensureTopField("fabric", { key: "appearance_desc", label: "外观描述", type: "text", options: [], level: "top", inputType: "multi" });
+      // 部件库
+      setLevel("part", "applicable", "middle");
+      const partLib = db.libraries.find((x) => x.key === "part");
+      const craftNote = partLib?.fields.find((x) => x.key === "craft_note");
+      if (craftNote) { craftNote.level = "top"; craftNote.inputType = "multi"; }
+      localStorage.setItem("garment_anno_level_demo_v1", "1");
+      changed = true;
+    }
     // Migrate annotations: craftPartGroups -> relationGroups (using rel_craft_part)
     db.annotations = (db.annotations || []).map((a: any) => {
       if (!Array.isArray(a.relationGroups)) {
