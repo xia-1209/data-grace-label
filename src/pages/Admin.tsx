@@ -1173,14 +1173,45 @@ export function AdminLibraries() {
         <Card className="p-4">
           <h3 className="font-semibold mb-2">字段配置</h3>
           <table className="w-full text-sm">
-            <thead className="text-left text-xs text-muted-foreground"><tr><th>key</th><th>label</th><th>类型</th><th>选项</th><th>自定义</th></tr></thead>
+            <thead className="text-left text-xs text-muted-foreground"><tr><th>key</th><th>label</th><th>类型</th><th>层级</th><th>塔尖输入</th><th>选项</th><th>自定义</th></tr></thead>
             <tbody>
               {lib.fields.map((f) => (
-                <tr key={f.key} className="border-t"><td>{f.key}</td><td>{f.label}</td><td>{f.type}</td><td className="text-xs">{f.options.join(", ")}</td><td>{f.allowCustom ? "✓" : "—"}</td></tr>
+                <tr key={f.key} className="border-t align-top">
+                  <td className="py-1">{f.key}</td>
+                  <td>{f.label}</td>
+                  <td>{f.type}</td>
+                  <td>
+                    <select className="border rounded px-1 py-0.5 text-xs"
+                      value={f.level || "basic"}
+                      onChange={(e) => updateLib((l) => {
+                        const fi = l.fields.find((x) => x.key === f.key);
+                        if (fi) (fi as any).level = e.target.value;
+                      })}>
+                      <option value="basic">底层</option>
+                      <option value="middle">中层</option>
+                      <option value="top">塔尖</option>
+                    </select>
+                  </td>
+                  <td>
+                    {(f.level || "basic") === "top" ? (
+                      <select className="border rounded px-1 py-0.5 text-xs"
+                        value={f.inputType || "single"}
+                        onChange={(e) => updateLib((l) => {
+                          const fi = l.fields.find((x) => x.key === f.key);
+                          if (fi) (fi as any).inputType = e.target.value;
+                        })}>
+                        <option value="single">单行</option>
+                        <option value="multi">多行</option>
+                      </select>
+                    ) : <span className="text-xs text-muted-foreground">—</span>}
+                  </td>
+                  <td className="text-xs">{f.options.join(", ")}</td>
+                  <td>{f.allowCustom ? "✓" : "—"}</td>
+                </tr>
               ))}
             </tbody>
           </table>
-          <p className="text-xs text-muted-foreground mt-2">字段的选项、自定义标签在"标签池管理"中维护。</p>
+          <p className="text-xs text-muted-foreground mt-2">层级：底层/中层使用预设选项+自定义；塔尖为自由文本输入。选项与自定义标签在"标签池管理"中维护。</p>
         </Card>
       )}
 
