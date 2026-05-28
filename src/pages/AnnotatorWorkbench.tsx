@@ -628,21 +628,22 @@ function PerspectiveForm({
           if (depVals.length > 0) availableOptions = Array.from(allowed);
         }
         const level = f.level || "basic";
-        const levelClass = level === "top"
-          ? "bg-amber-100 text-amber-700 border-amber-300"
+        const levelStyle = level === "top"
+          ? { cls: "bg-gradient-to-r from-rose-500 to-amber-500 text-white border-transparent shadow-sm", icon: "▲" }
           : level === "middle"
-            ? "bg-sky-100 text-sky-700 border-sky-300"
-            : "bg-muted text-muted-foreground border-border";
+            ? { cls: "bg-indigo-600 text-white border-transparent shadow-sm", icon: "◆" }
+            : { cls: "bg-emerald-600 text-white border-transparent shadow-sm", icon: "▬" };
         const isTop = level === "top";
         const topValue = typeof selected === "string" ? selected : (selected[0] || "");
         return (
           <div key={f.key}>
-            <div className="flex items-center gap-1 text-sm font-medium mb-2">
+            <div className="flex items-center gap-1.5 text-sm font-medium mb-2">
               {f.label}
               {f.required && <span className="text-destructive">*</span>}
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className={`ml-1 px-1.5 py-0.5 rounded border text-[10px] cursor-help ${levelClass}`}>
+                  <span className={`ml-1 inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full border text-[10px] font-semibold tracking-wide cursor-help ${levelStyle.cls}`}>
+                    <span className="text-[9px]">{levelStyle.icon}</span>
                     {FIELD_LEVEL_LABEL[level]}
                   </span>
                 </TooltipTrigger>
