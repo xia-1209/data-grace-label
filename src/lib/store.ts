@@ -246,6 +246,9 @@ export function loadDB(): DB {
         changed = true;
       }
       if (typeof l.guidelines !== "string") { l.guidelines = ""; changed = true; }
+      (l.fields || []).forEach((f: any) => {
+        if (!f.level) { f.level = "basic"; changed = true; }
+      });
       return l;
     });
     // Migrate annotations: craftPartGroups -> relationGroups (using rel_craft_part)
