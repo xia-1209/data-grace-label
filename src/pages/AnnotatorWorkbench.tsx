@@ -622,7 +622,7 @@ function PerspectiveForm({
         const selected: any = draft.data[f.key] ?? [];
         let availableOptions = f.options;
         if (f.dependsOn && f.optionMap) {
-          const depVals = draft.data[f.dependsOn] || [];
+          const depVals = (Array.isArray(draft.data[f.dependsOn]) ? draft.data[f.dependsOn] : []) as string[];
           const allowed = new Set<string>();
           depVals.forEach((dv) => (f.optionMap![dv] || []).forEach((o) => allowed.add(o)));
           if (depVals.length > 0) availableOptions = Array.from(allowed);
