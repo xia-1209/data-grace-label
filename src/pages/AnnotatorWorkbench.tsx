@@ -421,6 +421,12 @@ export default function AnnotatorWorkbench() {
                   <div className="text-xs text-muted-foreground">暂无标注规范</div>
                 )}
               </div>
+              <HistoryPanel
+                task={task}
+                activeStyle={activeStyle}
+                perspectives={editablePerspectives.length ? editablePerspectives : PERSPECTIVES}
+                users={db.users}
+              />
               <div>
                 <div className="font-medium mb-1">本款式自定义标签</div>
                 <div className="flex flex-wrap gap-1">
