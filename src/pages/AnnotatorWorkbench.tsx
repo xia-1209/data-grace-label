@@ -503,6 +503,68 @@ function StatusBadge({ s }: { s: AnnoStatus }) {
   return <span className={`text-[10px] px-1.5 py-0.5 rounded ${map[s]}`}>{lab[s]}</span>;
 }
 
+const STATUS_LABEL: Record<AnnoStatus, string> = { not_started: "未打标", drafted: "草稿", submitted: "已提交", approved: "已通过", rejected: "已打回" };
+
+function HistoryPanel({
+  task, activeStyle, perspectives, users,
+}: {
+  task: ReturnType<typeof loadDB>["tasks"][number];
+  activeStyle: ReturnType<typeof loadDB>["datasets"][number]["styles"][number] | null;
+  perspectives: Perspective[];
+  users: ReturnType<typeof loadDB>["users"];
+}) {
+  const [open, setOpen] = useState(true);
+  if (!activeStyle) {
+    return (
+      <div>
+        <div className="font-medium mb-1 flex items-center gap-1"><History className="w-3 h-3" />版本历史</div>
+        <div className="text-xs text-muted-foreground">请选择一个条目</div>
+      </div>
+    );
+  }
+  const entries = perspectives
+    .flatMap((p) => {
+      const a = getAnnotation(task.id, activeStyle.id, p);
+      return (a?.history || []).map((h) => ({ ...h, perspective: p }));
+    })
+    .sort((a, b) => b.ts - a.ts);
+  const nameOf = (pid: string) => users.find((u) => u.pid === pid)?.username || pid;
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full font-medium mb-1 flex items-center gap-1 hover:text-primary"
+      >
+        <History className="w-3 h-3" />
+        版本历史 ({entries.length})
+        <span className="ml-auto text-xs text-muted-foreground">{open ? "收起" : "展开"}</span>
+      </button>
+      {open && (
+        <div className="bg-muted/40 rounded p-2 max-h-64 overflow-auto space-y-1.5">
+          {entries.length === 0 ? (
+            <div className="text-xs text-muted-foreground">暂无历史记录</div>
+          ) : (
+            entries.map((h, i) => (
+              <div key={i} className="text-xs border-l-2 border-primary/40 pl-2 py-0.5">
+                <div className="flex items-center gap-1 flex-wrap">
+                  <span className="font-medium">{STATUS_LABEL[h.status]}</span>
+                  <span className="text-muted-foreground">· {PERSPECTIVE_LABEL[h.perspective]}</span>
+                </div>
+                <div className="text-muted-foreground">
+                  {new Date(h.ts).toLocaleString()} · {nameOf(h.by)}
+                </div>
+                {h.reason && <div className="text-destructive mt-0.5">打回：{h.reason}</div>}
+                {h.note && <div className="text-muted-foreground mt-0.5">备注：{h.note}</div>}
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PerspectiveForm({
   library, draft, editable, onChange,
 }: {
