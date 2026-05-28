@@ -619,7 +619,7 @@ function PerspectiveForm({
     <div className="space-y-4">
       {library.fields.map((f) => {
         if (relationFieldKeys.has(f.key)) return null;
-        const selected = draft.data[f.key] || [];
+        const selected: any = draft.data[f.key] ?? [];
         let availableOptions = f.options;
         if (f.dependsOn && f.optionMap) {
           const depVals = draft.data[f.dependsOn] || [];
