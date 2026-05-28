@@ -19,6 +19,19 @@ export interface User {
   roles: Role[]; // a user can have multiple roles
 }
 
+export type FieldLevel = "basic" | "middle" | "top";
+export const FIELD_LEVELS: FieldLevel[] = ["basic", "middle", "top"];
+export const FIELD_LEVEL_LABEL: Record<FieldLevel, string> = {
+  basic: "底层",
+  middle: "中层",
+  top: "塔尖",
+};
+export const FIELD_LEVEL_HINT: Record<FieldLevel, string> = {
+  basic: "只能从预设选项中选择，可添加自定义标签",
+  middle: "只能从预设选项中选择，可添加自定义标签",
+  top: "自由文本输入，无选项限制",
+};
+
 export interface FieldDef {
   key: string;
   label: string;
@@ -26,6 +39,8 @@ export interface FieldDef {
   options: string[];
   allowCustom?: boolean;
   required?: boolean;
+  level?: FieldLevel; // 金字塔层级，默认 basic
+  inputType?: "single" | "multi"; // 仅 level=top 时生效：单行/多行文本框
   /** Linkage: when this field's dependency value changes, only show options mapped here */
   dependsOn?: string;
   optionMap?: Record<string, string[]>; // depValue -> allowed options
