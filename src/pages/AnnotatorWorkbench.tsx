@@ -627,26 +627,50 @@ function PerspectiveForm({
           depVals.forEach((dv) => (f.optionMap![dv] || []).forEach((o) => allowed.add(o)));
           if (depVals.length > 0) availableOptions = Array.from(allowed);
         }
+        const level = f.level || "basic";
+        const levelClass = level === "top"
+          ? "bg-amber-100 text-amber-700 border-amber-300"
+          : level === "middle"
+            ? "bg-sky-100 text-sky-700 border-sky-300"
+            : "bg-muted text-muted-foreground border-border";
+        const isTop = level === "top";
+        const topValue = typeof selected === "string" ? selected : (selected[0] || "");
         return (
           <div key={f.key}>
             <div className="flex items-center gap-1 text-sm font-medium mb-2">
               {f.label}
               {f.required && <span className="text-destructive">*</span>}
-              {f.dependsOn && <span className="text-xs text-muted-foreground">（依赖 {library.fields.find((x) => x.key === f.dependsOn)?.label}）</span>}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className={`ml-1 px-1.5 py-0.5 rounded border text-[10px] cursor-help ${levelClass}`}>
+                    {FIELD_LEVEL_LABEL[level]}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent className="text-xs">{FIELD_LEVEL_HINT[level]}</TooltipContent>
+              </Tooltip>
+              {f.dependsOn && !isTop && <span className="text-xs text-muted-foreground">（依赖 {library.fields.find((x) => x.key === f.dependsOn)?.label}）</span>}
             </div>
-            {f.type === "text" ? (
-              <Input disabled={!editable} value={selected[0] || ""} onChange={(e) => setText(f.key, e.target.value)} />
+            {isTop ? (
+              f.inputType === "multi" ? (
+                <Textarea disabled={!editable} rows={3} value={topValue}
+                  onChange={(e) => onChange((d) => ({ ...d, data: { ...d.data, [f.key]: e.target.value } }))} />
+              ) : (
+                <Input disabled={!editable} value={topValue}
+                  onChange={(e) => onChange((d) => ({ ...d, data: { ...d.data, [f.key]: e.target.value } }))} />
+              )
+            ) : f.type === "text" ? (
+              <Input disabled={!editable} value={(selected as string[])[0] || ""} onChange={(e) => setText(f.key, e.target.value)} />
             ) : (
               <>
                 <div className="flex flex-wrap gap-2">
-                  {[...new Set([...availableOptions, ...selected])].map((opt) => {
+                  {[...new Set([...availableOptions, ...(selected as string[])])].map((opt) => {
                     const rule = getRule(f.key, opt);
                     const published = rule && rule.status === "published" ? rule : undefined;
                     return (
                       <div key={opt} className="flex items-center">
                         <button disabled={!editable} onClick={() => toggleOption(f.key, opt)}
                           className={`px-3 py-1 rounded-l-full border text-xs flex items-center gap-1 ${
-                            selected.includes(opt) ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-muted"
+                            (selected as string[]).includes(opt) ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-muted"
                           } ${!editable ? "opacity-70 cursor-not-allowed" : ""}`}>
                           {opt}
                         </button>
